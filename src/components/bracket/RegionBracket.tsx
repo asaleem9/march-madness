@@ -52,7 +52,7 @@ export function RegionBracket({
       <div className="scoreboard-heading text-[0.55rem] text-center mb-4 rounded">
         {REGION_DISPLAY_NAMES[region]} Region
       </div>
-      <div className="flex gap-6 overflow-x-auto pb-4">
+      <div className="flex gap-3 overflow-x-auto pb-4">
         {gamesByRound.map((roundGames, roundIndex) => (
           <div key={roundOrder[roundIndex]} className="flex flex-col gap-2">
             <div className="font-display text-[0.45rem] text-navy/60 text-center mb-2">

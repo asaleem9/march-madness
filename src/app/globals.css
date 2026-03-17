@@ -162,7 +162,7 @@ body {
 .game-slot {
   border: 2px solid var(--color-navy);
   background: white;
-  min-width: 230px;
+  min-width: 180px;
 }
 
 .game-slot-team {

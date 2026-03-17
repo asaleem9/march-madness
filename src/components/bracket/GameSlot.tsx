@@ -22,7 +22,7 @@ interface GameSlotProps {
   firstFourHintB?: FirstFourHint;
 }
 
-function truncateName(name: string, maxLen = 16): string {
+function truncateName(name: string, maxLen = 13): string {
   if (name.length <= maxLen) return name;
   return name.slice(0, maxLen - 1) + "\u2026";
 }
