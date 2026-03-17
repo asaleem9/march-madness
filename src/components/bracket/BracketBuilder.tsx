@@ -297,6 +297,10 @@ export function BracketBuilder({
     <div>
       {isEditable && (
         <div className="mb-6 space-y-4">
+          <p className="text-xs text-navy/50">
+            Tap a team to pick them as the winner. Work through each region, then pick your Final Four and Champion.
+            Save as a draft anytime, and finalize when all 63 picks are in. Upset picks earn 1.5x bonus points.
+          </p>
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex-1">
               <label className="font-display text-[0.55rem] text-navy block mb-2">

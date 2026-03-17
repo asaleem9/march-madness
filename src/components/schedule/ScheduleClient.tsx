@@ -137,11 +137,15 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                             </span>
                           )}
                         </div>
-                        {showScore && (
+                        {showScore ? (
                           <span className={`font-display text-xs ${isWinner ? "text-forest" : ""}`}>
                             {score}
                           </span>
-                        )}
+                        ) : team ? (
+                          <span className="font-display text-xs text-navy/20">
+                            &mdash;
+                          </span>
+                        ) : null}
                       </div>
                     );
                   })}
