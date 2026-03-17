@@ -163,6 +163,18 @@ export function BracketBuilder({
     [games, picksMap, teamMap]
   );
 
+  // Map First Four teams to their game slots for auto-deriving FF picks
+  const firstFourTeamToSlot = useMemo(() => {
+    const map = new Map<number, number>(); // teamId -> First Four gameSlot
+    for (const game of games) {
+      if (game.round === "first_four") {
+        if (game.teamA) map.set(game.teamA.id, game.gameSlot);
+        if (game.teamB) map.set(game.teamB.id, game.gameSlot);
+      }
+    }
+    return map;
+  }, [games]);
+
   const handlePick = useCallback(
     (gameSlot: number, teamId: number) => {
       if (!isEditable) return;
@@ -180,10 +192,30 @@ export function BracketBuilder({
         );
       }
 
+      // Auto-derive First Four pick when picking a FF team in a First Round game
+      if (game.round === "first_round") {
+        const ffSlot = firstFourTeamToSlot.get(teamId);
+        if (ffSlot !== undefined) {
+          const ffGame = games.find((g) => g.gameSlot === ffSlot);
+          if (ffGame) {
+            // Also handle cascade if changing the FF pick
+            const currentFFPick = picks.get(ffSlot);
+            if (currentFFPick && currentFFPick.pickedTeamId !== teamId) {
+              clearDownstreamPicks(
+                ffSlot,
+                currentFFPick.pickedTeamId,
+                gameSlotInfos
+              );
+            }
+            setPick(ffSlot, ffGame.round, teamId);
+          }
+        }
+      }
+
       setPick(gameSlot, game.round, teamId);
       setSuccess("");
     },
-    [isEditable, games, picks, setPick, clearDownstreamPicks, gameSlotInfos]
+    [isEditable, games, picks, setPick, clearDownstreamPicks, gameSlotInfos, firstFourTeamToSlot]
   );
 
   const buildPicksArray = () =>

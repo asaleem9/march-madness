@@ -4,11 +4,6 @@ import type { Team } from "@/types";
 import { cn } from "@/lib/utils";
 import { getWinProbability, formatOdds } from "@/lib/odds";
 
-export interface FirstFourHint {
-  teamAName: string;
-  teamBName: string;
-}
-
 interface GameSlotProps {
   gameSlot: number;
   teamA: Team | null;
@@ -18,8 +13,10 @@ interface GameSlotProps {
   isEditable: boolean;
   isCorrect: boolean | null;
   onPick: (gameSlot: number, teamId: number) => void;
-  firstFourHintA?: FirstFourHint;
-  firstFourHintB?: FirstFourHint;
+  // When a slot is TBD because it's fed by a First Four game,
+  // pass the two First Four teams so the user can pick directly
+  firstFourTeamsA?: [Team, Team];
+  firstFourTeamsB?: [Team, Team];
 }
 
 function truncateName(name: string, maxLen = 13): string {
@@ -34,7 +31,6 @@ function TeamRow({
   isCorrect,
   isEditable,
   onClick,
-  firstFourHint,
 }: {
   team: Team | null;
   isSelected: boolean;
@@ -42,23 +38,12 @@ function TeamRow({
   isCorrect: boolean | null;
   isEditable: boolean;
   onClick: () => void;
-  firstFourHint?: FirstFourHint;
 }) {
   if (!team) {
     return (
       <div className="game-slot-team opacity-50">
         <div className="w-6 h-6 rounded-full bg-navy/10 shrink-0" />
-        <span className="font-body text-xs text-navy/40 flex-1">
-          {firstFourHint ? (
-            <span title={`Winner of ${firstFourHint.teamAName} vs ${firstFourHint.teamBName}`}>
-              <span className="text-navy/50">{firstFourHint.teamAName}</span>
-              <span className="text-navy/30"> / </span>
-              <span className="text-navy/50">{firstFourHint.teamBName}</span>
-            </span>
-          ) : (
-            "TBD"
-          )}
-        </span>
+        <span className="font-body text-xs text-navy/40 flex-1">TBD</span>
         <div className="flex flex-col items-end shrink-0">
           <span className="text-[0.45rem] text-navy/30">&mdash;</span>
         </div>
@@ -151,6 +136,37 @@ function TeamRow({
   );
 }
 
+// Renders two First Four teams as clickable options in a single slot position
+function FirstFourPicker({
+  teams,
+  selectedTeamId,
+  isEditable,
+  onPick,
+  gameSlot,
+}: {
+  teams: [Team, Team];
+  selectedTeamId: number | null;
+  isEditable: boolean;
+  onPick: (gameSlot: number, teamId: number) => void;
+  gameSlot: number;
+}) {
+  return (
+    <div className="flex flex-col">
+      {teams.map((team) => (
+        <TeamRow
+          key={team.id}
+          team={team}
+          isSelected={selectedTeamId === team.id}
+          isWinner={false}
+          isCorrect={null}
+          isEditable={isEditable}
+          onClick={() => onPick(gameSlot, team.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function GameSlot({
   gameSlot,
   teamA,
@@ -160,30 +176,51 @@ export function GameSlot({
   isEditable,
   isCorrect,
   onPick,
-  firstFourHintA,
-  firstFourHintB,
+  firstFourTeamsA,
+  firstFourTeamsB,
 }: GameSlotProps) {
+  const showPickerA = !teamA && firstFourTeamsA;
+  const showPickerB = !teamB && firstFourTeamsB;
+
   return (
     <div className="game-slot rounded">
-      <TeamRow
-        team={teamA}
-        isSelected={selectedTeamId === teamA?.id}
-        isWinner={winnerId === teamA?.id}
-        isCorrect={selectedTeamId === teamA?.id ? isCorrect : null}
-        isEditable={isEditable && !!teamA}
-        onClick={() => teamA && onPick(gameSlot, teamA.id)}
-        firstFourHint={firstFourHintA}
-      />
+      {showPickerA ? (
+        <FirstFourPicker
+          teams={firstFourTeamsA}
+          selectedTeamId={selectedTeamId}
+          isEditable={isEditable}
+          onPick={onPick}
+          gameSlot={gameSlot}
+        />
+      ) : (
+        <TeamRow
+          team={teamA}
+          isSelected={selectedTeamId === teamA?.id}
+          isWinner={winnerId === teamA?.id}
+          isCorrect={selectedTeamId === teamA?.id ? isCorrect : null}
+          isEditable={isEditable && !!teamA}
+          onClick={() => teamA && onPick(gameSlot, teamA.id)}
+        />
+      )}
       <div className="game-slot-divider" />
-      <TeamRow
-        team={teamB}
-        isSelected={selectedTeamId === teamB?.id}
-        isWinner={winnerId === teamB?.id}
-        isCorrect={selectedTeamId === teamB?.id ? isCorrect : null}
-        isEditable={isEditable && !!teamB}
-        onClick={() => teamB && onPick(gameSlot, teamB.id)}
-        firstFourHint={firstFourHintB}
-      />
+      {showPickerB ? (
+        <FirstFourPicker
+          teams={firstFourTeamsB}
+          selectedTeamId={selectedTeamId}
+          isEditable={isEditable}
+          onPick={onPick}
+          gameSlot={gameSlot}
+        />
+      ) : (
+        <TeamRow
+          team={teamB}
+          isSelected={selectedTeamId === teamB?.id}
+          isWinner={winnerId === teamB?.id}
+          isCorrect={selectedTeamId === teamB?.id ? isCorrect : null}
+          isEditable={isEditable && !!teamB}
+          onClick={() => teamB && onPick(gameSlot, teamB.id)}
+        />
+      )}
     </div>
   );
 }
