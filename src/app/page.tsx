@@ -21,7 +21,9 @@ export default function HomePage() {
             <div
               className="css-basketball"
               style={{ animation: "basketball-bounce 1.2s ease-in-out infinite" }}
-            />
+            >
+              <span className="css-basketball-seams" />
+            </div>
 
             {/* Right bracket */}
             <div
