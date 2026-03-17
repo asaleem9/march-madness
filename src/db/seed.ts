@@ -114,10 +114,10 @@ function buildGameSlots(): GameSeed[] {
 
   // First Four (slots 1-4)
   const firstFourSchedule = [
-    { slot: 1, region: "midwest", next: 5, pos: "top", date: "2026-03-17T18:00:00Z" },   // Howard vs UMBC
-    { slot: 2, region: "south", next: 6, pos: "top", date: "2026-03-17T20:30:00Z" },      // Lehigh vs Prairie View
-    { slot: 3, region: "west", next: 17, pos: "bottom", date: "2026-03-18T18:00:00Z" },   // Texas vs NC State
-    { slot: 4, region: "midwest", next: 21, pos: "bottom", date: "2026-03-18T20:30:00Z" },// SMU vs Miami Ohio
+    { slot: 1, region: "midwest", next: 29, pos: "bottom", date: "2026-03-17T18:00:00Z" }, // Howard vs UMBC → Midwest 1v16
+    { slot: 2, region: "south", next: 21, pos: "bottom", date: "2026-03-17T20:30:00Z" },  // Lehigh vs Prairie View → South 1v16
+    { slot: 3, region: "west", next: 17, pos: "bottom", date: "2026-03-18T18:00:00Z" },   // Texas vs NC State → West 6v11
+    { slot: 4, region: "midwest", next: 33, pos: "bottom", date: "2026-03-18T20:30:00Z" },// SMU vs Miami Ohio → Midwest 6v11
   ];
 
   for (const ff of firstFourSchedule) {
