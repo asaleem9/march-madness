@@ -1,4 +1,6 @@
 import Link from "next/link";
+import FeatureIcon from "@/components/FeatureIcon";
+import SectionDivider from "@/components/SectionDivider";
 
 export default function HomePage() {
   return (
@@ -7,7 +9,31 @@ export default function HomePage() {
       <section className="relative overflow-hidden bg-navy py-16 sm:py-24">
         <div className="absolute inset-0 crt-effect" />
         <div className="relative z-10 max-w-4xl mx-auto px-4 text-center">
-          <h1 className="font-display text-gold text-xl sm:text-3xl leading-relaxed mb-6">
+          {/* Animated bracket lines */}
+          <div className="flex justify-center items-center gap-6 sm:gap-10 mb-8">
+            {/* Left bracket */}
+            <div
+              className="hidden sm:block w-8 h-24 border-l-3 border-t-3 border-b-3 border-gold/40"
+              style={{ animation: "bracket-draw-left 1s ease-out 0.3s both" }}
+            />
+
+            {/* Bouncing basketball */}
+            <div
+              className="css-basketball"
+              style={{ animation: "basketball-bounce 1.2s ease-in-out infinite" }}
+            />
+
+            {/* Right bracket */}
+            <div
+              className="hidden sm:block w-8 h-24 border-r-3 border-t-3 border-b-3 border-gold/40"
+              style={{ animation: "bracket-draw-right 1s ease-out 0.3s both" }}
+            />
+          </div>
+
+          <h1
+            className="font-display text-gold text-xl sm:text-3xl leading-relaxed mb-6"
+            style={{ animation: "title-glow 3s ease-in-out infinite" }}
+          >
             MARCH
             <br />
             MADNESS
@@ -25,6 +51,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      <SectionDivider />
+
       {/* Features Section */}
       <section className="max-w-6xl mx-auto px-4 py-16">
         <h2 className="font-display text-navy text-center text-sm mb-12">
@@ -35,6 +63,7 @@ export default function HomePage() {
             <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
               STEP 1
             </div>
+            <FeatureIcon icon="basketball" />
             <h3 className="font-display text-[0.65rem] text-navy mb-3">
               Pick Your Winners
             </h3>
@@ -47,6 +76,7 @@ export default function HomePage() {
             <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
               STEP 2
             </div>
+            <FeatureIcon icon="trophy" />
             <h3 className="font-display text-[0.65rem] text-navy mb-3">
               Challenge Friends
             </h3>
@@ -59,6 +89,7 @@ export default function HomePage() {
             <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
               STEP 3
             </div>
+            <FeatureIcon icon="chart" />
             <h3 className="font-display text-[0.65rem] text-navy mb-3">
               Track Live Results
             </h3>
@@ -69,6 +100,8 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <SectionDivider />
 
       {/* Scoring Section */}
       <section className="bg-navy py-12">
@@ -84,8 +117,11 @@ export default function HomePage() {
               { round: "E8", points: 80 },
               { round: "F4", points: 160 },
               { round: "CHAMP", points: 320 },
-            ].map((item) => (
-              <div key={item.round} className="text-center">
+            ].map((item, i) => (
+              <div
+                key={item.round}
+                className={`text-center py-2 ${i < 5 ? "md:border-r md:border-gold/20" : ""}`}
+              >
                 <div className="font-display text-burnt-orange text-sm mb-1">
                   {item.points}
                 </div>
@@ -95,9 +131,11 @@ export default function HomePage() {
               </div>
             ))}
           </div>
-          <p className="text-center text-cream/60 text-xs mt-6">
-            Upset picks earn a 1.5x bonus multiplier
-          </p>
+          <div className="flex justify-center mt-6">
+            <span className="inline-block font-display text-[0.5rem] bg-burnt-orange text-cream px-4 py-2 border-2 border-burnt-orange/60 shadow-[3px_3px_0_rgba(0,0,0,0.3)]">
+              UPSET PICKS EARN 1.5× BONUS
+            </span>
+          </div>
         </div>
       </section>
     </div>
