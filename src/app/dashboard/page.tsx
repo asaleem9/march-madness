@@ -67,15 +67,10 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Brackets */}
         <div className="lg:col-span-2 retro-card p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4">
             <h2 className="scoreboard-heading text-[0.55rem] rounded px-3 py-2">
               MY BRACKETS
             </h2>
-            {!bracketLocked && (!brackets || brackets.length === 0) && (
-              <Link href="/bracket/new" className="retro-btn retro-btn-primary text-[0.5rem]">
-                New Bracket
-              </Link>
-            )}
           </div>
 
           {brackets && brackets.length > 0 ? (
