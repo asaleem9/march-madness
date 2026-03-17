@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Header } from "@/components/layout/Header";
@@ -22,6 +23,18 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap"
           rel="stylesheet"
         />
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-3K3WJCJS6M"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-3K3WJCJS6M');
+          `}
+        </Script>
       </head>
       <body className="bg-texture grain-overlay min-h-screen flex flex-col">
         <Providers>
