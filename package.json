@@ -10,6 +10,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "npx tsx src/db/seed.ts",
+    "db:clear": "npx tsx scripts/clear-db.ts",
     "generate-vapid": "npx tsx scripts/generate-vapid-keys.ts",
     "test": "vitest run",
     "test:watch": "vitest"
