@@ -111,8 +111,9 @@ export function BracketBuilder({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [currentStep, setCurrentStep] = useState<Step>("east");
+  const [finalized, setFinalized] = useState(false);
 
-  const isEditable = isOwner && !isLocked;
+  const isEditable = isOwner && !isLocked && !finalized;
 
   // Load existing picks
   useEffect(() => {
@@ -224,6 +225,7 @@ export function BracketBuilder({
       if (!bracketId) {
         router.push(`/bracket/${data.bracketId}`);
       } else if (lock) {
+        setFinalized(true);
         router.refresh();
       } else {
         setSuccess("Draft saved!");
@@ -353,7 +355,7 @@ export function BracketBuilder({
         </div>
       )}
 
-      {isLocked && isOwner && (
+      {(isLocked || finalized) && isOwner && (
         <div className="bg-gold/20 border-2 border-gold text-navy text-xs p-3 mb-4 rounded font-display text-[0.55rem]">
           BRACKET FINALIZED — No more changes allowed.
         </div>
