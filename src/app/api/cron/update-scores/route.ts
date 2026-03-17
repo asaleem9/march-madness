@@ -134,6 +134,19 @@ export async function GET(request: NextRequest) {
             .from("games")
             .update({ [updateField]: winnerId })
             .eq("game_slot", game.next_game_slot);
+
+          // For First Four games: update any First Round picks that used
+          // the convention team_a pick to point to the actual winner.
+          // Users pick "TEX / NCST" as a unit; we store team_a's ID by
+          // convention. If team_b won, swap picks to the real winner so
+          // standard scoring (picked_team_id === winner_id) works.
+          if (game.round === "first_four" && loserId) {
+            await supabase
+              .from("bracket_picks")
+              .update({ picked_team_id: winnerId })
+              .eq("game_slot", game.next_game_slot)
+              .eq("picked_team_id", loserId);
+          }
         }
 
         // Update bracket picks for this game
