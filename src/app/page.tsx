@@ -14,11 +14,7 @@ export default function HomePage() {
             <br />
             <span className="text-burnt-orange">2026</span>
           </h1>
-          <p className="font-body text-cream text-sm mb-8 max-w-md mx-auto">
-            Fill out your bracket. Challenge your friends. Track every
-            buzzer-beater in retro style.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
             <Link href="/signup" className="retro-btn retro-btn-primary">
               Create Bracket
             </Link>
