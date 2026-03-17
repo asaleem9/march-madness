@@ -46,7 +46,7 @@ export default function SignupPage() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/callback?redirect=/profile`,
+        redirectTo: `${window.location.origin}/callback?redirect=/dashboard`,
       },
     });
   };
