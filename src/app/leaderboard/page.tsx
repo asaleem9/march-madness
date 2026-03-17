@@ -1,10 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 
 export default async function LeaderboardPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
-  // Fetch all primary brackets with profiles
+  // Fetch all primary brackets with profiles (admin client bypasses RLS so
+  // unauthenticated visitors can see the leaderboard)
   const { data: brackets } = await supabase
     .from("brackets")
     .select("*, profiles!inner(id, display_name, avatar_url)")
