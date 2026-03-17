@@ -75,13 +75,17 @@ export async function GET(request: NextRequest) {
 
       if (!game) continue;
 
-      // Get scores from ESPN
+      // Get scores from ESPN — match by ESPN team ID, not array position
       const competitors = competition.competitors;
-      const homeTeam = competitors[0];
-      const awayTeam = competitors[1];
-
-      const scoreA = homeTeam?.score ? parseInt(homeTeam.score) : null;
-      const scoreB = awayTeam?.score ? parseInt(awayTeam.score) : null;
+      let scoreA: number | null = null;
+      let scoreB: number | null = null;
+      for (const c of competitors) {
+        if (game.team_a?.espn_id === c.team.id && c.score) {
+          scoreA = parseInt(c.score);
+        } else if (game.team_b?.espn_id === c.team.id && c.score) {
+          scoreB = parseInt(c.score);
+        }
+      }
 
       let winnerId: number | null = null;
       if (status === "final") {
