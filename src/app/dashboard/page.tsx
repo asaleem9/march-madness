@@ -112,8 +112,8 @@ export default async function DashboardPage() {
               <p className="text-sm text-navy/60 mb-4">
                 You haven&apos;t created a bracket yet.
               </p>
-              <Link href="/bracket/new" className="retro-btn retro-btn-primary">
-                Create Your First Bracket
+              <Link href="/bracket/new" className="retro-btn retro-btn-primary inline-block text-center">
+                Create Bracket
               </Link>
             </div>
           )}
