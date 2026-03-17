@@ -13,7 +13,7 @@ export default function DunkHero() {
           fps={30}
           compositionWidth={480}
           compositionHeight={300}
-          style={{ width: "100%", height: "auto" }}
+          style={{ width: "100%", aspectRatio: "480 / 300" }}
           loop
           autoPlay
           controls={false}

@@ -28,13 +28,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check if user already has a primary bracket
+  // Enforce one bracket per user
   const { data: existingBrackets } = await supabase
     .from("brackets")
-    .select("id, is_primary")
+    .select("id")
     .eq("user_id", user.id);
 
-  const hasPrimary = existingBrackets?.some((b) => b.is_primary);
+  if (existingBrackets && existingBrackets.length > 0) {
+    return NextResponse.json(
+      { error: "You already have a bracket", bracketId: existingBrackets[0].id },
+      { status: 409 }
+    );
+  }
 
   // Create bracket
   const { data: bracket, error: bracketError } = await supabase
@@ -42,7 +47,7 @@ export async function POST(request: NextRequest) {
     .insert({
       user_id: user.id,
       name: name || "My Bracket",
-      is_primary: !hasPrimary,
+      is_primary: true,
     })
     .select()
     .single();

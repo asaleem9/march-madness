@@ -64,7 +64,7 @@ export default async function DashboardPage() {
             <h2 className="scoreboard-heading text-[0.55rem] rounded px-3 py-2">
               MY BRACKETS
             </h2>
-            {!bracketLocked && (
+            {!bracketLocked && (!brackets || brackets.length === 0) && (
               <Link href="/bracket/new" className="retro-btn retro-btn-primary text-[0.5rem]">
                 New Bracket
               </Link>

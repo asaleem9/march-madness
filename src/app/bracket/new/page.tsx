@@ -26,6 +26,18 @@ export default async function NewBracketPage() {
     redirect("/dashboard");
   }
 
+  // Enforce one bracket per user — redirect to existing bracket
+  const { data: existingBracket } = await supabase
+    .from("brackets")
+    .select("id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .single();
+
+  if (existingBracket) {
+    redirect(`/bracket/${existingBracket.id}`);
+  }
+
   // Fetch all games with teams
   const { data: games } = await supabase
     .from("games")
