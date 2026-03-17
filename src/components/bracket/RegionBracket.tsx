@@ -1,14 +1,15 @@
 "use client";
 
-import type { Region, GameWithTeams } from "@/types";
-import { GameSlot, type FirstFourHint } from "./GameSlot";
+import type { Region, GameWithTeams, Team } from "@/types";
+import { GameSlot } from "./GameSlot";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
 
 interface RegionBracketProps {
   region: Region;
   games: GameWithTeams[];
-  picks: Map<number, number>; // gameSlot -> pickedTeamId
-  pickResults: Map<number, boolean | null>; // gameSlot -> isCorrect
+  picks: Map<number, number>;
+  pickResults: Map<number, boolean | null>;
+  resolvedTeams: Map<number, { teamA: Team | null; teamB: Team | null }>;
   isEditable: boolean;
   onPick: (gameSlot: number, teamId: number) => void;
 }
@@ -18,22 +19,16 @@ export function RegionBracket({
   games,
   picks,
   pickResults,
+  resolvedTeams,
   isEditable,
   onPick,
 }: RegionBracketProps) {
-  // Build First Four hints: map from next_game_slot to the two competing team names
-  const firstFourHints = new Map<number, FirstFourHint>();
-  const firstFourGames = games.filter((g) => g.round === "first_four");
-  for (const ffGame of firstFourGames) {
-    if (ffGame.nextGameSlot && ffGame.teamA && ffGame.teamB) {
-      firstFourHints.set(ffGame.nextGameSlot, {
-        teamA: ffGame.teamA.abbreviation,
-        teamB: ffGame.teamB.abbreviation,
-      });
-    }
-  }
+  // Get First Four games for this region
+  const firstFourGames = games
+    .filter((g) => g.round === "first_four" && g.region === region)
+    .sort((a, b) => a.gameSlot - b.gameSlot);
 
-  // Group games by round
+  // Group games by round (excluding first_four which we handle separately)
   const roundOrder = [
     "first_round",
     "second_round",
@@ -52,6 +47,35 @@ export function RegionBracket({
       <div className="scoreboard-heading text-[0.55rem] text-center mb-4 rounded">
         {REGION_DISPLAY_NAMES[region]} Region
       </div>
+
+      {/* First Four games for this region */}
+      {firstFourGames.length > 0 && (
+        <div className="mb-6">
+          <div className="font-display text-[0.45rem] text-navy/60 text-center mb-3">
+            FIRST FOUR
+          </div>
+          <div className="flex gap-3 justify-center flex-wrap">
+            {firstFourGames.map((game) => {
+              const resolved = resolvedTeams.get(game.gameSlot);
+              return (
+                <GameSlot
+                  key={game.gameSlot}
+                  gameSlot={game.gameSlot}
+                  teamA={resolved?.teamA ?? game.teamA}
+                  teamB={resolved?.teamB ?? game.teamB}
+                  selectedTeamId={picks.get(game.gameSlot) ?? null}
+                  winnerId={game.winnerId}
+                  isEditable={isEditable}
+                  isCorrect={pickResults.get(game.gameSlot) ?? null}
+                  onPick={onPick}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Main bracket rounds */}
       <div className="flex gap-3 overflow-x-auto pb-4">
         {gamesByRound.map((roundGames, roundIndex) => (
           <div key={roundOrder[roundIndex]} className="flex flex-col gap-2">
@@ -63,13 +87,9 @@ export function RegionBracket({
               style={{ gap: `${Math.pow(2, roundIndex + 1) * 8}px` }}
             >
               {roundGames.map((game) => {
-                const teamA = game.teamA;
-                const teamB = game.teamB;
-
-                // Check if either team slot is fed by a First Four game
-                const hint = firstFourHints.get(game.gameSlot);
-                const hintA = !teamA && hint && game.teamAId === null ? hint : undefined;
-                const hintB = !teamB && hint && game.teamBId === null ? hint : undefined;
+                const resolved = resolvedTeams.get(game.gameSlot);
+                const teamA = resolved?.teamA ?? game.teamA;
+                const teamB = resolved?.teamB ?? game.teamB;
 
                 return (
                   <GameSlot
@@ -82,8 +102,6 @@ export function RegionBracket({
                     isEditable={isEditable}
                     isCorrect={pickResults.get(game.gameSlot) ?? null}
                     onPick={onPick}
-                    firstFourHintA={hintA}
-                    firstFourHintB={hintB}
                   />
                 );
               })}
