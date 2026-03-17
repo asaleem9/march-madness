@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
@@ -11,6 +12,7 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -38,8 +40,7 @@ export default function SignupPage() {
       return;
     }
 
-    setSuccess(true);
-    setLoading(false);
+    router.push("/dashboard");
   };
 
   const handleGoogleSignup = async () => {
@@ -50,25 +51,6 @@ export default function SignupPage() {
       },
     });
   };
-
-  if (success) {
-    return (
-      <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">
-        <div className="retro-card p-8 w-full max-w-md text-center">
-          <h1 className="font-display text-forest text-sm mb-4">
-            CHECK YOUR EMAIL
-          </h1>
-          <p className="font-body text-xs text-navy/70 mb-6">
-            We sent a verification link to <strong>{email}</strong>. Click it to
-            activate your account and start filling out your bracket.
-          </p>
-          <Link href="/login" className="retro-btn retro-btn-secondary">
-            Back to Login
-          </Link>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">
