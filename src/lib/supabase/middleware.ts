@@ -35,7 +35,7 @@ export async function updateSession(request: NextRequest) {
 
   const protectedRoutes = [
     "/dashboard",
-    "/bracket",
+    "/bracket/new",
     "/wagers",
     "/profile",
     "/admin",

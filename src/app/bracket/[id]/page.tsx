@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect, notFound } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { notFound } from "next/navigation";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
 import type { GameWithTeams, Region } from "@/types";
 
@@ -9,15 +10,18 @@ interface Props {
 
 export default async function BracketPage({ params }: Props) {
   const { id } = await params;
+
+  // Use admin client for reads so unauthenticated users can view brackets
+  const adminSupabase = createAdminClient();
+
+  // Get current user (optional — viewers may not be logged in)
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/login");
-
   // Fetch the bracket
-  const { data: bracket } = await supabase
+  const { data: bracket } = await adminSupabase
     .from("brackets")
     .select("*")
     .eq("id", id)
@@ -25,16 +29,16 @@ export default async function BracketPage({ params }: Props) {
 
   if (!bracket) notFound();
 
-  const isOwner = bracket.user_id === user.id;
+  const isOwner = !!user && bracket.user_id === user.id;
 
   // Fetch bracket picks
-  const { data: picks } = await supabase
+  const { data: picks } = await adminSupabase
     .from("bracket_picks")
     .select("*")
     .eq("bracket_id", id);
 
   // Check lock status
-  const { data: config } = await supabase
+  const { data: config } = await adminSupabase
     .from("tournament_config")
     .select("*")
     .eq("id", 1)
@@ -45,7 +49,7 @@ export default async function BracketPage({ params }: Props) {
     (config ? new Date() > new Date(config.bracket_lock_deadline) : false);
 
   // Fetch all games with teams
-  const { data: games } = await supabase
+  const { data: games } = await adminSupabase
     .from("games")
     .select(
       `
