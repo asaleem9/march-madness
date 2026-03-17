@@ -32,7 +32,7 @@ export default async function SchedulePage() {
 
     if (bracket) {
       const { data: picks } = await supabase
-        .from("picks")
+        .from("bracket_picks")
         .select("game_slot, picked_team_id")
         .eq("bracket_id", bracket.id);
 

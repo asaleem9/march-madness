@@ -123,9 +123,9 @@ function TeamRow({
           className="w-6 h-6 rounded-full object-contain shrink-0"
         />
       ) : (
-        <div className="w-6 h-6 rounded-full bg-gold/30 shrink-0 flex items-center justify-center">
-          <span className="text-[0.35rem] font-display text-navy">
-            {team.seed}
+        <div className="w-6 h-6 rounded-full bg-navy/15 shrink-0 flex items-center justify-center">
+          <span className="text-[0.3rem] font-display text-navy">
+            {team.abbreviation}
           </span>
         </div>
       )}

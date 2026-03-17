@@ -231,9 +231,15 @@ function buildGameSlots(): GameSeed[] {
 async function seed() {
   console.log("Seeding database...");
 
-  // Insert teams
-  console.log(`Inserting ${teams.length} teams...`);
-  const { error: teamsError } = await supabase.from("teams").insert(teams);
+  // Insert teams (with ESPN logo URLs)
+  const teamsWithLogos = teams.map((t) => ({
+    ...t,
+    logo_url: t.espn_id
+      ? `https://a.espncdn.com/i/teamlogos/ncaa/500/${t.espn_id}.png`
+      : null,
+  }));
+  console.log(`Inserting ${teamsWithLogos.length} teams...`);
+  const { error: teamsError } = await supabase.from("teams").insert(teamsWithLogos);
   if (teamsError) {
     console.error("Error inserting teams:", teamsError);
     return;

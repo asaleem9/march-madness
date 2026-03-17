@@ -82,9 +82,22 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                     const isPicked = team && userPicks[game.game_slot] === team.id;
                     const isPickCorrect = isPicked && game.status === "final" && game.winner_id === team.id;
                     const isPickWrong = isPicked && game.status === "final" && game.winner_id !== team.id;
+                    const isWinner = team && game.status === "final" && game.winner_id === team.id;
+                    const showScore = score !== null && game.status !== "scheduled";
 
                     return (
-                      <div key={i} className="flex items-center justify-between">
+                      <div
+                        key={i}
+                        className={`flex items-center justify-between rounded px-1.5 py-0.5 -mx-1.5 ${
+                          isPicked
+                            ? isPickCorrect
+                              ? "bg-forest/10 border-l-2 border-forest"
+                              : isPickWrong
+                              ? "bg-burnt-orange/10 border-l-2 border-burnt-orange"
+                              : "bg-gold/10 border-l-2 border-gold"
+                            : ""
+                        }`}
+                      >
                         <div className="flex items-center gap-2">
                           {team ? (
                             <>
@@ -95,11 +108,13 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                                   className="w-5 h-5 object-contain"
                                 />
                               ) : (
-                                <span className="seed-badge text-[0.35rem]">
-                                  {team.seed}
-                                </span>
+                                <div className="w-5 h-5 rounded-full bg-navy/15 shrink-0 flex items-center justify-center">
+                                  <span className="text-[0.3rem] font-display text-navy">
+                                    {team.abbreviation}
+                                  </span>
+                                </div>
                               )}
-                              <span className="font-body text-xs">
+                              <span className={`font-body text-xs ${isWinner ? "font-bold" : ""}`}>
                                 {team.name}
                               </span>
                               {isPicked && (
@@ -122,8 +137,8 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                             </span>
                           )}
                         </div>
-                        {score !== null && (
-                          <span className="font-display text-xs">
+                        {showScore && (
+                          <span className={`font-display text-xs ${isWinner ? "text-forest" : ""}`}>
                             {score}
                           </span>
                         )}
