@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Bracket Madness
+
+A March Madness bracket prediction app for the 2026 NCAA tournament. Fill out your bracket, compete on leaderboards, place wagers against friends, and get live score updates — all in a retro sports aesthetic.
+
+**Live at [bracketmadness.vercel.app](https://bracketmadness.vercel.app)**
+
+## Features
+
+- **Bracket Builder** — Pick winners across all 67 games (including First Four play-ins) with an interactive bracket UI
+- **Live Scores** — Real-time game updates via ESPN data and Supabase Realtime
+- **Leaderboards** — See how your picks stack up against everyone else, with upset bonus scoring
+- **Wagers** — Challenge friends to head-to-head bracket matchups
+- **Notifications** — Get updates via Web Push, SMS, or email when your picks hit (or miss)
+- **Retro Theme** — Press Start 2P headers, Space Mono body text, and a color palette straight out of an '80s sports bar
+
+## Tech Stack
+
+- **Framework**: Next.js 16 (App Router)
+- **Database**: Supabase (PostgreSQL + Auth + Realtime)
+- **ORM**: Drizzle
+- **State**: Zustand (bracket picks) + TanStack Query (server data)
+- **Styling**: Tailwind CSS v4
+- **Animation**: Remotion (hero animation)
+- **Deployment**: Vercel
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Set up environment variables (see .env.example)
+cp .env.example .env.local
+
+# Run database migrations
+npm run db:migrate
+
+# Seed teams and tournament data
+npm run db:seed
+
+# Start dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to see the app.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server |
+| `npm run build` | Production build |
+| `npm run lint` | Run ESLint |
+| `npm run db:generate` | Generate Drizzle migrations |
+| `npm run db:migrate` | Run Drizzle migrations |
+| `npm run db:seed` | Seed teams, game slots, config |
+| `npm run generate-vapid` | Generate VAPID keys for Web Push |
+| `npm test` | Run tests |
