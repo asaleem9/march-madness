@@ -88,14 +88,11 @@ export function BracketBuilder({
 
     try {
       const picksArray = Array.from(picks.entries()).map(
-        ([gameSlot, teamId]) => {
-          const game = games.find((g) => g.gameSlot === gameSlot);
-          return {
-            game_slot: gameSlot,
-            round: game?.round || "first_round",
-            picked_team_id: teamId,
-          };
-        }
+        ([gameSlot, pick]) => ({
+          game_slot: gameSlot,
+          round: typeof pick === "object" ? pick.round : (games.find((g) => g.gameSlot === gameSlot)?.round || "first_round"),
+          picked_team_id: typeof pick === "object" ? pick.pickedTeamId : pick,
+        })
       );
 
       const response = await fetch("/api/brackets", {
