@@ -8,15 +8,23 @@ interface ScheduleGame {
   round: string;
   region: string | null;
   game_slot: number;
+  team_a_id: number | null;
+  team_b_id: number | null;
+  winner_id: number | null;
   status: string;
   score_a: number | null;
   score_b: number | null;
   scheduled_at: string | null;
-  team_a: { name: string; seed: number; abbreviation: string } | null;
-  team_b: { name: string; seed: number; abbreviation: string } | null;
+  team_a: { id: number; name: string; seed: number; abbreviation: string; logo_url: string | null } | null;
+  team_b: { id: number; name: string; seed: number; abbreviation: string; logo_url: string | null } | null;
 }
 
-export function ScheduleClient({ games }: { games: ScheduleGame[] }) {
+interface ScheduleClientProps {
+  games: ScheduleGame[];
+  userPicks?: Record<number, number>;
+}
+
+export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
   useRealtimeGames();
 
   // Group by round
@@ -67,54 +75,61 @@ export function ScheduleClient({ games }: { games: ScheduleGame[] }) {
                   </div>
                 )}
                 <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {game.team_a && (
-                        <>
-                          <span className="seed-badge text-[0.35rem]">
-                            {game.team_a.seed}
+                  {[
+                    { team: game.team_a, score: game.score_a },
+                    { team: game.team_b, score: game.score_b },
+                  ].map(({ team, score }, i) => {
+                    const isPicked = team && userPicks[game.game_slot] === team.id;
+                    const isPickCorrect = isPicked && game.status === "final" && game.winner_id === team.id;
+                    const isPickWrong = isPicked && game.status === "final" && game.winner_id !== team.id;
+
+                    return (
+                      <div key={i} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {team ? (
+                            <>
+                              {team.logo_url ? (
+                                <img
+                                  src={team.logo_url}
+                                  alt={team.abbreviation}
+                                  className="w-5 h-5 object-contain"
+                                />
+                              ) : (
+                                <span className="seed-badge text-[0.35rem]">
+                                  {team.seed}
+                                </span>
+                              )}
+                              <span className="font-body text-xs">
+                                {team.name}
+                              </span>
+                              {isPicked && (
+                                <span
+                                  className={`font-display text-[0.4rem] px-1 py-0.5 rounded ${
+                                    isPickCorrect
+                                      ? "bg-forest/20 text-forest"
+                                      : isPickWrong
+                                      ? "bg-burnt-orange/20 text-burnt-orange line-through"
+                                      : "bg-gold/30 text-navy"
+                                  }`}
+                                >
+                                  {isPickCorrect ? "CORRECT" : isPickWrong ? "WRONG" : "YOUR PICK"}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="font-body text-xs text-navy/40">
+                              TBD
+                            </span>
+                          )}
+                        </div>
+                        {score !== null && (
+                          <span className="font-display text-xs">
+                            {score}
                           </span>
-                          <span className="font-body text-xs">
-                            {game.team_a.name}
-                          </span>
-                        </>
-                      )}
-                      {!game.team_a && (
-                        <span className="font-body text-xs text-navy/40">
-                          TBD
-                        </span>
-                      )}
-                    </div>
-                    {game.score_a !== null && (
-                      <span className="font-display text-xs">
-                        {game.score_a}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {game.team_b && (
-                        <>
-                          <span className="seed-badge text-[0.35rem]">
-                            {game.team_b.seed}
-                          </span>
-                          <span className="font-body text-xs">
-                            {game.team_b.name}
-                          </span>
-                        </>
-                      )}
-                      {!game.team_b && (
-                        <span className="font-body text-xs text-navy/40">
-                          TBD
-                        </span>
-                      )}
-                    </div>
-                    {game.score_b !== null && (
-                      <span className="font-display text-xs">
-                        {game.score_b}
-                      </span>
-                    )}
-                  </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 {game.scheduled_at && game.status === "scheduled" && (
                   <div className="text-[0.55rem] text-navy/50 mt-2">
