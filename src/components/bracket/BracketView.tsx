@@ -14,13 +14,6 @@ interface BracketViewProps {
   score: number;
 }
 
-const GRID_REGIONS = [
-  { region: "east" as const, position: "top-left" },
-  { region: "west" as const, position: "top-right" },
-  { region: "south" as const, position: "bottom-left" },
-  { region: "midwest" as const, position: "bottom-right" },
-];
-
 export function BracketView({
   games,
   picks,
@@ -34,6 +27,10 @@ export function BracketView({
     .filter((g) => g.round === "final_four")
     .sort((a, b) => a.gameSlot - b.gameSlot);
   const championshipGame = games.find((g) => g.round === "championship");
+
+  // Semi 1 = slot 65 (East vs West), Semi 2 = slot 66 (South vs Midwest)
+  const semi1 = finalFourGames.find((g) => g.gameSlot === 65);
+  const semi2 = finalFourGames.find((g) => g.gameSlot === 66);
 
   return (
     <div className="space-y-6">
@@ -54,63 +51,125 @@ export function BracketView({
         )}
       </div>
 
-      {/* 2x2 Region Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {GRID_REGIONS.map(({ region }) => (
-          <div key={region} className="min-w-0">
+      {/* Traditional bracket layout */}
+      <div className="overflow-x-auto">
+        <div className="bracket-layout">
+          {/* Row 1, Col 1: East (LTR) */}
+          <div style={{ gridColumn: 1, gridRow: 1 }} className="p-2">
             <RegionBracket
-              region={region}
+              region="east"
               games={games}
               picks={picks}
               pickResults={pickResults}
               isEditable={isEditable}
               onPick={onPick}
+              direction="ltr"
             />
           </div>
-        ))}
-      </div>
 
-      {/* Final Four + Championship */}
-      <div className="flex flex-col items-center gap-6 py-4">
-        <div className="scoreboard-heading text-[0.55rem] text-center rounded px-6 py-2">
-          FINAL FOUR
-        </div>
-        <div className="flex gap-8 justify-center flex-wrap">
-          {finalFourGames.map((game) => (
-            <div key={game.gameSlot} className="flex flex-col items-center gap-2">
-              <div className="font-display text-[0.45rem] text-navy/60">
-                SEMIFINAL
-              </div>
-              <GameSlot
-                gameSlot={game.gameSlot}
-                teamA={game.teamA}
-                teamB={game.teamB}
-                selectedTeamId={picks.get(game.gameSlot) ?? null}
-                winnerId={game.winnerId}
-                isEditable={isEditable}
-                isCorrect={pickResults.get(game.gameSlot) ?? null}
-                onPick={onPick}
-              />
-            </div>
-          ))}
-        </div>
-        {championshipGame && (
-          <div className="flex flex-col items-center gap-2">
-            <div className="font-display text-[0.5rem] text-gold">
-              CHAMPIONSHIP
-            </div>
-            <GameSlot
-              gameSlot={championshipGame.gameSlot}
-              teamA={championshipGame.teamA}
-              teamB={championshipGame.teamB}
-              selectedTeamId={picks.get(championshipGame.gameSlot) ?? null}
-              winnerId={championshipGame.winnerId}
+          {/* Row 2, Col 1: South (LTR) */}
+          <div style={{ gridColumn: 1, gridRow: 2 }} className="p-2">
+            <RegionBracket
+              region="south"
+              games={games}
+              picks={picks}
+              pickResults={pickResults}
               isEditable={isEditable}
-              isCorrect={pickResults.get(championshipGame.gameSlot) ?? null}
               onPick={onPick}
+              direction="ltr"
             />
           </div>
-        )}
+
+          {/* Row 1, Col 3: West (RTL) */}
+          <div style={{ gridColumn: 3, gridRow: 1 }} className="p-2">
+            <RegionBracket
+              region="west"
+              games={games}
+              picks={picks}
+              pickResults={pickResults}
+              isEditable={isEditable}
+              onPick={onPick}
+              direction="rtl"
+            />
+          </div>
+
+          {/* Row 2, Col 3: Midwest (RTL) */}
+          <div style={{ gridColumn: 3, gridRow: 2 }} className="p-2">
+            <RegionBracket
+              region="midwest"
+              games={games}
+              picks={picks}
+              pickResults={pickResults}
+              isEditable={isEditable}
+              onPick={onPick}
+              direction="rtl"
+            />
+          </div>
+
+          {/* Center column: Final Four + Championship */}
+          <div className="bracket-center-col">
+            {/* Semifinal 1 */}
+            {semi1 && (
+              <div className="flex flex-col items-center gap-1">
+                <div className="font-display text-[0.45rem] text-navy/60">
+                  SEMIFINAL 1
+                </div>
+                <GameSlot
+                  gameSlot={semi1.gameSlot}
+                  teamA={semi1.teamA}
+                  teamB={semi1.teamB}
+                  selectedTeamId={picks.get(semi1.gameSlot) ?? null}
+                  winnerId={semi1.winnerId}
+                  isEditable={isEditable}
+                  isCorrect={pickResults.get(semi1.gameSlot) ?? null}
+                  onPick={onPick}
+                />
+              </div>
+            )}
+
+            <div className="bracket-center-connector" />
+
+            {/* Championship */}
+            {championshipGame && (
+              <div className="flex flex-col items-center gap-1">
+                <div className="font-display text-[0.5rem] text-gold">
+                  CHAMPIONSHIP
+                </div>
+                <GameSlot
+                  gameSlot={championshipGame.gameSlot}
+                  teamA={championshipGame.teamA}
+                  teamB={championshipGame.teamB}
+                  selectedTeamId={picks.get(championshipGame.gameSlot) ?? null}
+                  winnerId={championshipGame.winnerId}
+                  isEditable={isEditable}
+                  isCorrect={pickResults.get(championshipGame.gameSlot) ?? null}
+                  onPick={onPick}
+                />
+              </div>
+            )}
+
+            <div className="bracket-center-connector" />
+
+            {/* Semifinal 2 */}
+            {semi2 && (
+              <div className="flex flex-col items-center gap-1">
+                <div className="font-display text-[0.45rem] text-navy/60">
+                  SEMIFINAL 2
+                </div>
+                <GameSlot
+                  gameSlot={semi2.gameSlot}
+                  teamA={semi2.teamA}
+                  teamB={semi2.teamB}
+                  selectedTeamId={picks.get(semi2.gameSlot) ?? null}
+                  winnerId={semi2.winnerId}
+                  isEditable={isEditable}
+                  isCorrect={pickResults.get(semi2.gameSlot) ?? null}
+                  onPick={onPick}
+                />
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
