@@ -4,6 +4,11 @@ import type { Team } from "@/types";
 import { cn } from "@/lib/utils";
 import { getWinProbability, formatOdds } from "@/lib/odds";
 
+export interface FirstFourHint {
+  teamAName: string;
+  teamBName: string;
+}
+
 interface GameSlotProps {
   gameSlot: number;
   teamA: Team | null;
@@ -13,6 +18,8 @@ interface GameSlotProps {
   isEditable: boolean;
   isCorrect: boolean | null;
   onPick: (gameSlot: number, teamId: number) => void;
+  firstFourHintA?: FirstFourHint;
+  firstFourHintB?: FirstFourHint;
 }
 
 function truncateName(name: string, maxLen = 13): string {
@@ -27,6 +34,7 @@ function TeamRow({
   isCorrect,
   isEditable,
   onClick,
+  firstFourHint,
 }: {
   team: Team | null;
   isSelected: boolean;
@@ -34,12 +42,23 @@ function TeamRow({
   isCorrect: boolean | null;
   isEditable: boolean;
   onClick: () => void;
+  firstFourHint?: FirstFourHint;
 }) {
   if (!team) {
     return (
       <div className="game-slot-team opacity-50">
         <div className="w-6 h-6 rounded-full bg-navy/10 shrink-0" />
-        <span className="font-body text-xs text-navy/40 flex-1">TBD</span>
+        <span className="font-body text-xs text-navy/40 flex-1">
+          {firstFourHint ? (
+            <span title={`Winner of ${firstFourHint.teamAName} vs ${firstFourHint.teamBName}`}>
+              <span className="text-navy/50">{firstFourHint.teamAName}</span>
+              <span className="text-navy/30"> / </span>
+              <span className="text-navy/50">{firstFourHint.teamBName}</span>
+            </span>
+          ) : (
+            "TBD"
+          )}
+        </span>
         <div className="flex flex-col items-end shrink-0">
           <span className="text-[0.45rem] text-navy/30">&mdash;</span>
         </div>
@@ -141,6 +160,8 @@ export function GameSlot({
   isEditable,
   isCorrect,
   onPick,
+  firstFourHintA,
+  firstFourHintB,
 }: GameSlotProps) {
   return (
     <div className="game-slot rounded">
@@ -151,6 +172,7 @@ export function GameSlot({
         isCorrect={selectedTeamId === teamA?.id ? isCorrect : null}
         isEditable={isEditable && !!teamA}
         onClick={() => teamA && onPick(gameSlot, teamA.id)}
+        firstFourHint={firstFourHintA}
       />
       <div className="game-slot-divider" />
       <TeamRow
@@ -160,6 +182,7 @@ export function GameSlot({
         isCorrect={selectedTeamId === teamB?.id ? isCorrect : null}
         isEditable={isEditable && !!teamB}
         onClick={() => teamB && onPick(gameSlot, teamB.id)}
+        firstFourHint={firstFourHintB}
       />
     </div>
   );
