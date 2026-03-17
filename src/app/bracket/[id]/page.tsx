@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
-import type { GameWithTeams } from "@/types";
+import type { GameWithTeams, Region } from "@/types";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -64,7 +64,7 @@ export default async function BracketPage({ params }: Props) {
       name: t.name as string,
       abbreviation: t.abbreviation as string,
       seed: t.seed as number,
-      region: t.region as GameWithTeams["region"],
+      region: t.region as Region,
       record: t.record as string,
       logoUrl: (t.logo_url as string) || null,
       eliminated: t.eliminated as boolean,
