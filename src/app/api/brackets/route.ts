@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+const REQUIRED_PICKS = 63;
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   const {
@@ -12,7 +14,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { name, picks } = body;
+  const { name, picks, lock } = body;
 
   // Check deadline
   const { data: config } = await supabase
@@ -41,6 +43,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // If locking, require all picks
+  if (lock && (!picks || picks.length < REQUIRED_PICKS)) {
+    return NextResponse.json(
+      { error: `All ${REQUIRED_PICKS} picks are required to finalize your bracket` },
+      { status: 400 }
+    );
+  }
+
   // Create bracket
   const { data: bracket, error: bracketError } = await supabase
     .from("brackets")
@@ -48,6 +58,7 @@ export async function POST(request: NextRequest) {
       user_id: user.id,
       name: name || "My Bracket",
       is_primary: true,
+      locked: !!lock,
     })
     .select()
     .single();
@@ -84,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ bracketId: bracket.id });
+  return NextResponse.json({ bracketId: bracket.id, locked: !!lock });
 }
 
 export async function PUT(request: NextRequest) {
@@ -98,7 +109,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { bracketId, name, picks } = body;
+  const { bracketId, name, picks, lock } = body;
 
   // Verify ownership and lock status
   const { data: bracket } = await supabase
@@ -129,13 +140,25 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  // Update bracket name
-  if (name) {
-    await supabase
-      .from("brackets")
-      .update({ name, updated_at: new Date().toISOString() })
-      .eq("id", bracketId);
+  // If locking, require all picks
+  if (lock && (!picks || picks.length < REQUIRED_PICKS)) {
+    return NextResponse.json(
+      { error: `All ${REQUIRED_PICKS} picks are required to finalize your bracket` },
+      { status: 400 }
+    );
   }
+
+  // Update bracket name and lock status
+  const updateFields: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (name) updateFields.name = name;
+  if (lock) updateFields.locked = true;
+
+  await supabase
+    .from("brackets")
+    .update(updateFields)
+    .eq("id", bracketId);
 
   // Replace all picks
   if (picks && picks.length > 0) {
@@ -159,5 +182,5 @@ export async function PUT(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ bracketId });
+  return NextResponse.json({ bracketId, locked: !!lock });
 }
