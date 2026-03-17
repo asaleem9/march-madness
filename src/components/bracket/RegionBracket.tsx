@@ -1,7 +1,7 @@
 "use client";
 
 import type { Region, GameWithTeams, Team } from "@/types";
-import { GameSlot } from "./GameSlot";
+import { GameSlot, type FirstFourHint } from "./GameSlot";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
 
 interface RegionBracketProps {
@@ -27,6 +27,21 @@ export function RegionBracket({
   const firstFourGames = games
     .filter((g) => g.round === "first_four" && g.region === region)
     .sort((a, b) => a.gameSlot - b.gameSlot);
+
+  // Build First Four hints: map from next_game_slot to hint with team names
+  // This shows "TEX / NCST" instead of "TBD" in First Round slots fed by First Four
+  const firstFourHints = new Map<number, { hint: FirstFourHint; position: string | null }>();
+  for (const ffGame of firstFourGames) {
+    if (ffGame.nextGameSlot && ffGame.teamA && ffGame.teamB) {
+      firstFourHints.set(ffGame.nextGameSlot, {
+        hint: {
+          teamAName: ffGame.teamA.abbreviation,
+          teamBName: ffGame.teamB.abbreviation,
+        },
+        position: ffGame.slotPosition,
+      });
+    }
+  }
 
   // Group games by round (excluding first_four which we handle separately)
   const roundOrder = [
@@ -91,6 +106,11 @@ export function RegionBracket({
                 const teamA = resolved?.teamA ?? game.teamA;
                 const teamB = resolved?.teamB ?? game.teamB;
 
+                // Show First Four hint labels on TBD slots
+                const ffInfo = firstFourHints.get(game.gameSlot);
+                const hintA = !teamA && ffInfo && ffInfo.position === "top" ? ffInfo.hint : undefined;
+                const hintB = !teamB && ffInfo && ffInfo.position === "bottom" ? ffInfo.hint : undefined;
+
                 return (
                   <GameSlot
                     key={game.gameSlot}
@@ -102,6 +122,8 @@ export function RegionBracket({
                     isEditable={isEditable}
                     isCorrect={pickResults.get(game.gameSlot) ?? null}
                     onPick={onPick}
+                    firstFourHintA={hintA}
+                    firstFourHintB={hintB}
                   />
                 );
               })}
