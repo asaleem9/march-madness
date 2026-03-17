@@ -13,6 +13,7 @@ interface BracketBuilderProps {
   bracketId?: string;
   existingPicks?: { gameSlot: number; round: string; pickedTeamId: number }[];
   existingName?: string;
+  defaultName?: string;
   isLocked: boolean;
   isOwner: boolean;
   score?: number;
@@ -23,6 +24,7 @@ export function BracketBuilder({
   bracketId,
   existingPicks,
   existingName,
+  defaultName,
   isLocked,
   isOwner,
   score = 0,
@@ -56,6 +58,8 @@ export function BracketBuilder({
     }
     if (existingName) {
       setBracketName(existingName);
+    } else if (defaultName) {
+      setBracketName(defaultName);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

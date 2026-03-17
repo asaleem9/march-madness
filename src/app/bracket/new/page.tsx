@@ -86,6 +86,10 @@ export default async function NewBracketPage() {
     winner: mapTeam(g.winner as Record<string, unknown> | null),
   }));
 
+  const displayName =
+    user.user_metadata?.display_name || user.email?.split("@")[0] || "My";
+  const defaultBracketName = `${displayName}'s Bracket`;
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="font-display text-navy text-sm mb-6">
@@ -95,6 +99,7 @@ export default async function NewBracketPage() {
         games={formattedGames}
         isLocked={isLocked}
         isOwner={true}
+        defaultName={defaultBracketName}
       />
     </div>
   );

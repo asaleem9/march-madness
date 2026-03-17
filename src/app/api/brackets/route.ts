@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     .from("brackets")
     .insert({
       user_id: user.id,
-      name: name || "My Bracket",
+      name: name || `${user.user_metadata?.display_name || user.email?.split("@")[0] || "My"}'s Bracket`,
       is_primary: true,
       locked: !!lock,
     })
