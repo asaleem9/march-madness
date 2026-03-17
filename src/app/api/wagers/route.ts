@@ -1,0 +1,130 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+export async function POST(request: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { opponent_id, challenger_bracket_id, stakes } = body;
+
+  if (!opponent_id || !challenger_bracket_id || !stakes) {
+    return NextResponse.json(
+      { error: "Missing required fields" },
+      { status: 400 }
+    );
+  }
+
+  // Check wager deadline
+  const { data: config } = await supabase
+    .from("tournament_config")
+    .select("wager_creation_deadline")
+    .eq("id", 1)
+    .single();
+
+  if (config && new Date() > new Date(config.wager_creation_deadline)) {
+    return NextResponse.json(
+      { error: "Wager creation deadline has passed" },
+      { status: 403 }
+    );
+  }
+
+  // Verify bracket ownership
+  const { data: bracket } = await supabase
+    .from("brackets")
+    .select("id")
+    .eq("id", challenger_bracket_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!bracket) {
+    return NextResponse.json({ error: "Invalid bracket" }, { status: 400 });
+  }
+
+  const { data: wager, error } = await supabase
+    .from("wagers")
+    .insert({
+      challenger_id: user.id,
+      opponent_id,
+      challenger_bracket_id,
+      stakes,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Queue notification for opponent
+  await supabase.from("notification_queue").insert({
+    user_id: opponent_id,
+    type: "wager_request",
+    payload: {
+      wager_id: wager.id,
+      challenger_name: user.user_metadata?.display_name || "Someone",
+      stakes,
+    },
+  });
+
+  return NextResponse.json({ wagerId: wager.id });
+}
+
+export async function PATCH(request: NextRequest) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { wager_id, action, bracket_id } = body;
+
+  // Fetch wager
+  const { data: wager } = await supabase
+    .from("wagers")
+    .select("*")
+    .eq("id", wager_id)
+    .single();
+
+  if (!wager || wager.opponent_id !== user.id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (wager.status !== "pending") {
+    return NextResponse.json(
+      { error: "Wager already responded to" },
+      { status: 400 }
+    );
+  }
+
+  if (action === "accept") {
+    const { error } = await supabase
+      .from("wagers")
+      .update({
+        status: "accepted",
+        opponent_bracket_id: bracket_id || null,
+      })
+      .eq("id", wager_id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  } else if (action === "decline") {
+    await supabase
+      .from("wagers")
+      .update({ status: "declined" })
+      .eq("id", wager_id);
+  }
+
+  return NextResponse.json({ success: true });
+}
