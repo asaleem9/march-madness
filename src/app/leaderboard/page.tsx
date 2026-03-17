@@ -33,9 +33,12 @@ export default async function LeaderboardPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="font-display text-navy text-sm mb-8 text-center">
+      <h1 className="font-display text-navy text-sm mb-4 text-center">
         LEADERBOARD
       </h1>
+      <p className="text-center text-xs text-navy/50 mb-8">
+        Points are awarded as games finish. Later rounds are worth more, and upset picks earn a 1.5x bonus.
+      </p>
 
       <div className="retro-card overflow-hidden">
         <div className="scoreboard-heading text-[0.55rem] flex justify-between px-6">

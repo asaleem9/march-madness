@@ -153,7 +153,7 @@ export default function WagersPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-2">
         <h1 className="font-display text-navy text-sm">WAGERS</h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
@@ -162,6 +162,10 @@ export default function WagersPage() {
           {showCreate ? "Cancel" : "New Wager"}
         </button>
       </div>
+
+      <p className="text-xs text-navy/50 mb-6">
+        Challenge a friend to a friendly IOU wager. Whoever&apos;s bracket scores higher wins. Stakes are just for fun — loser honors the bet.
+      </p>
 
       {/* Create wager form */}
       {showCreate && (

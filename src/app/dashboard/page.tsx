@@ -53,9 +53,16 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="font-display text-navy text-sm mb-8">
+      <h1 className="font-display text-navy text-sm mb-2">
         Welcome, {profile?.display_name || "Player"}
       </h1>
+      <p className="text-xs text-navy/50 mb-8">
+        {brackets && brackets.length > 0 && brackets[0].locked
+          ? "Your bracket is locked in. Check the schedule for live scores and the leaderboard to see where you stand."
+          : brackets && brackets.length > 0
+          ? "Fill out all 63 picks and finalize your bracket before the deadline. Once locked, you can challenge friends to wagers."
+          : "Get started by creating your bracket below. Pick winners for every game, then challenge your friends."}
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Brackets */}

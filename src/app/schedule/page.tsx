@@ -46,9 +46,12 @@ export default async function SchedulePage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="font-display text-navy text-sm mb-8 text-center">
+      <h1 className="font-display text-navy text-sm mb-4 text-center">
         GAME SCHEDULE
       </h1>
+      <p className="text-center text-xs text-navy/50 mb-8">
+        Scores update automatically as games are played. Your bracket picks are highlighted on each matchup.
+      </p>
       <ScheduleClient games={games || []} userPicks={userPicks} />
     </div>
   );
