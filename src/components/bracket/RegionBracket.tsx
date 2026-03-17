@@ -1,7 +1,7 @@
 "use client";
 
 import type { Region, GameWithTeams } from "@/types";
-import { GameSlot } from "./GameSlot";
+import { GameSlot, type FirstFourHint } from "./GameSlot";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
 
 interface RegionBracketProps {
@@ -21,6 +21,18 @@ export function RegionBracket({
   isEditable,
   onPick,
 }: RegionBracketProps) {
+  // Build First Four hints: map from next_game_slot to the two competing team names
+  const firstFourHints = new Map<number, FirstFourHint>();
+  const firstFourGames = games.filter((g) => g.round === "first_four");
+  for (const ffGame of firstFourGames) {
+    if (ffGame.nextGameSlot && ffGame.teamA && ffGame.teamB) {
+      firstFourHints.set(ffGame.nextGameSlot, {
+        teamA: ffGame.teamA.abbreviation,
+        teamB: ffGame.teamB.abbreviation,
+      });
+    }
+  }
+
   // Group games by round
   const roundOrder = [
     "first_round",
@@ -51,9 +63,13 @@ export function RegionBracket({
               style={{ gap: `${Math.pow(2, roundIndex + 1) * 8}px` }}
             >
               {roundGames.map((game) => {
-                // Determine teams — for later rounds, teams come from picks
                 const teamA = game.teamA;
                 const teamB = game.teamB;
+
+                // Check if either team slot is fed by a First Four game
+                const hint = firstFourHints.get(game.gameSlot);
+                const hintA = !teamA && hint && game.teamAId === null ? hint : undefined;
+                const hintB = !teamB && hint && game.teamBId === null ? hint : undefined;
 
                 return (
                   <GameSlot
@@ -66,6 +82,8 @@ export function RegionBracket({
                     isEditable={isEditable}
                     isCorrect={pickResults.get(game.gameSlot) ?? null}
                     onPick={onPick}
+                    firstFourHintA={hintA}
+                    firstFourHintB={hintB}
                   />
                 );
               })}

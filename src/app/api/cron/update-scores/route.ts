@@ -25,18 +25,53 @@ export async function GET(request: NextRequest) {
 
   let gamesUpdated = 0;
   let scoresRecalculated = 0;
+  let gamesDiscovered = 0;
 
   for (const event of scoreboard.events) {
     for (const competition of event.competitions) {
       const espnGameId = competition.id;
       const status = parseGameStatus(competition.status.type.state);
 
-      // Find matching game in our DB
-      const { data: game } = await supabase
+      // Find matching game in our DB by espn_game_id
+      let { data: game } = await supabase
         .from("games")
         .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
         .eq("espn_game_id", espnGameId)
         .single();
+
+      // Auto-discover: if no match by espn_game_id, try matching by team ESPN IDs
+      if (!game) {
+        const competitors = competition.competitors;
+        const espnTeamIds = competitors.map((c) => c.team.id).filter((id) => id !== "-1" && id !== "-2");
+        if (espnTeamIds.length === 2) {
+          // Find our teams that match these ESPN IDs
+          const { data: matchedTeams } = await supabase
+            .from("teams")
+            .select("id")
+            .in("espn_id", espnTeamIds);
+
+          if (matchedTeams && matchedTeams.length === 2) {
+            const teamIds = matchedTeams.map((t) => t.id);
+            // Find a game with no espn_game_id that has both these teams
+            const { data: candidates } = await supabase
+              .from("games")
+              .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
+              .is("espn_game_id", null)
+              .in("team_a_id", teamIds)
+              .in("team_b_id", teamIds);
+
+            if (candidates && candidates.length === 1) {
+              // Set the espn_game_id for future lookups
+              await supabase
+                .from("games")
+                .update({ espn_game_id: espnGameId })
+                .eq("id", candidates[0].id);
+              game = candidates[0];
+              gamesDiscovered++;
+            }
+          }
+        }
+      }
 
       if (!game) continue;
 
@@ -197,6 +232,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     message: "Scores updated",
     gamesUpdated,
+    gamesDiscovered,
     scoresRecalculated,
     timestamp: new Date().toISOString(),
   });
