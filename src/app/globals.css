@@ -198,3 +198,89 @@ body {
 .game-slot-divider {
   border-top: 1px solid var(--color-navy);
 }
+
+/* Basketball bounce animation */
+@keyframes basketball-bounce {
+  0%, 100% {
+    transform: translateY(0) scaleX(1) scaleY(1);
+    animation-timing-function: cubic-bezier(0.2, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(-40px) scaleX(1) scaleY(1);
+    animation-timing-function: cubic-bezier(0, 0, 0.8, 1);
+  }
+  90% {
+    transform: translateY(0) scaleX(1.1) scaleY(0.85);
+  }
+  95% {
+    transform: translateY(-4px) scaleX(1) scaleY(1);
+  }
+}
+
+/* Title glow animation */
+@keyframes title-glow {
+  0%, 100% {
+    text-shadow:
+      0 0 10px rgba(212, 168, 67, 0.3),
+      0 0 20px rgba(212, 168, 67, 0.1);
+  }
+  50% {
+    text-shadow:
+      0 0 20px rgba(212, 168, 67, 0.6),
+      0 0 40px rgba(212, 168, 67, 0.3),
+      0 0 60px rgba(212, 168, 67, 0.1);
+  }
+}
+
+/* Bracket draw animation */
+@keyframes bracket-draw-left {
+  0% { clip-path: inset(0 100% 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+
+@keyframes bracket-draw-right {
+  0% { clip-path: inset(0 0 0 100%); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+
+/* CSS basketball */
+.css-basketball {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f28c38, #e94560 60%, #c23050);
+  position: relative;
+  box-shadow: inset -3px -3px 6px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.css-basketball::before,
+.css-basketball::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+}
+
+/* Horizontal seam */
+.css-basketball::before {
+  top: 47%;
+  left: 5%;
+  width: 90%;
+  height: 6%;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+}
+
+/* Vertical seam */
+.css-basketball::after {
+  top: 5%;
+  left: 47%;
+  width: 6%;
+  height: 90%;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+}
+
+.css-basketball-lg {
+  width: 28px;
+  height: 28px;
+}
