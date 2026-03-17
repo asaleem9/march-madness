@@ -1,40 +1,30 @@
 import Link from "next/link";
-import { HeroDynamic } from "@/components/HeroDynamic";
 
 export default function HomePage() {
   return (
     <div className="min-h-[calc(100vh-8rem)]">
       {/* Hero Section */}
-      <section className="relative overflow-hidden bg-navy py-12 sm:py-20">
+      <section className="relative overflow-hidden bg-navy py-16 sm:py-24">
         <div className="absolute inset-0 crt-effect" />
-        <div className="relative z-10 max-w-6xl mx-auto px-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-            <div className="text-center lg:text-left">
-              <h1 className="font-display text-gold text-lg sm:text-2xl leading-relaxed mb-6">
-                MARCH
-                <br />
-                MADNESS
-                <br />
-                <span className="text-burnt-orange">2026</span>
-              </h1>
-              <p className="font-body text-cream text-sm mb-8 max-w-md mx-auto lg:mx-0">
-                Fill out your bracket. Challenge your friends. Track every
-                buzzer-beater in retro style.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Link href="/signup" className="retro-btn retro-btn-primary">
-                  Create Bracket
-                </Link>
-                <Link href="/leaderboard" className="retro-btn retro-btn-gold">
-                  Leaderboard
-                </Link>
-              </div>
-            </div>
-            <div className="flex justify-center">
-              <div className="w-full max-w-md">
-                <HeroDynamic />
-              </div>
-            </div>
+        <div className="relative z-10 max-w-4xl mx-auto px-4 text-center">
+          <h1 className="font-display text-gold text-xl sm:text-3xl leading-relaxed mb-6">
+            MARCH
+            <br />
+            MADNESS
+            <br />
+            <span className="text-burnt-orange">2026</span>
+          </h1>
+          <p className="font-body text-cream text-sm mb-8 max-w-md mx-auto">
+            Fill out your bracket. Challenge your friends. Track every
+            buzzer-beater in retro style.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link href="/signup" className="retro-btn retro-btn-primary">
+              Create Bracket
+            </Link>
+            <Link href="/leaderboard" className="retro-btn retro-btn-gold">
+              Leaderboard
+            </Link>
           </div>
         </div>
       </section>
