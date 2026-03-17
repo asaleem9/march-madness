@@ -259,15 +259,16 @@ This document defines the full test suite for the March Madness Bracket Challeng
 | 2 | No-op if slot doesn't exist (no crash) | Map unchanged |
 | 3 | Sets isDirty to true | `isDirty === true` |
 
-#### `clearDownstreamPicks(gameSlot, allGames)`
+#### `clearDownstreamPicks(gameSlot, oldTeamId, allGames)`
 
 | # | Test Case | Expected |
 |---|-----------|----------|
-| 1 | Clears next game slot pick | Downstream pick removed |
-| 2 | Clears recursively through multiple rounds | 3-level chain all cleared |
-| 3 | Does not clear picks in unrelated branches | Sibling branch picks untouched |
-| 4 | No-op if game has no nextGameSlot (championship) | No changes |
-| 5 | Works with empty picks map (no crash) | Map still empty |
+| 1 | Clears next game slot pick when it matches old team | Downstream pick removed |
+| 2 | Does not clear downstream pick for a different team | Pick preserved |
+| 3 | Clears recursively through multiple rounds | 3-level chain all cleared |
+| 4 | Does not clear picks in unrelated branches | Sibling branch picks untouched |
+| 5 | No-op if game has no nextGameSlot (championship) | No changes |
+| 6 | Works with empty picks map (no crash) | Map still empty |
 
 #### `findDownstreamSlots(gameSlot, allGames)` (internal, test via clearDownstreamPicks behavior)
 
@@ -322,7 +323,7 @@ All API tests use mocked Supabase clients. Test both successful and error paths.
 | 5 | Bracket with no picks (empty array) | 200 | Bracket created, no picks inserted |
 | 6 | Bracket with valid picks | 200 | `{ bracketId: "..." }` |
 | 7 | Picks insert fails → bracket rolled back | 500 | Bracket deleted, error returned |
-| 8 | Default name used when none provided | 200 | Name is `"My Bracket"` |
+| 8 | Default name used when none provided | 200 | Name is `"{displayName}'s Bracket"` |
 | 9 | Custom name preserved | 200 | Name matches input |
 
 #### PUT — Update Bracket

@@ -14,13 +14,17 @@ interface BracketState {
 
   setPick: (gameSlot: number, round: Round, pickedTeamId: number) => void;
   removePick: (gameSlot: number) => void;
-  clearDownstreamPicks: (gameSlot: number, allGames: GameSlotInfo[]) => void;
+  clearDownstreamPicks: (
+    gameSlot: number,
+    oldTeamId: number,
+    allGames: GameSlotInfo[]
+  ) => void;
   setBracketName: (name: string) => void;
   loadPicks: (picks: BracketPick[]) => void;
   reset: () => void;
 }
 
-interface GameSlotInfo {
+export interface GameSlotInfo {
   gameSlot: number;
   nextGameSlot: number | null;
   round: Round;
@@ -43,7 +47,7 @@ function findDownstreamSlots(
   return downstream;
 }
 
-export const useBracketStore = create<BracketState>((set, get) => ({
+export const useBracketStore = create<BracketState>((set) => ({
   picks: new Map(),
   bracketName: "My Bracket",
   isDirty: false,
@@ -64,18 +68,14 @@ export const useBracketStore = create<BracketState>((set, get) => ({
     });
   },
 
-  clearDownstreamPicks: (gameSlot, allGames) => {
+  clearDownstreamPicks: (gameSlot, oldTeamId, allGames) => {
     const downstream = findDownstreamSlots(gameSlot, allGames);
     set((state) => {
       const picks = new Map(state.picks);
-      // Check if the team that was picked in downstream games
-      // is no longer valid (because the upstream pick changed)
-      const currentPick = picks.get(gameSlot);
       for (const slot of downstream) {
         const downstreamPick = picks.get(slot);
-        if (downstreamPick && currentPick) {
-          // If the downstream pick was the team that was just changed,
-          // remove it
+        // Only clear if the downstream pick was for the team being replaced
+        if (downstreamPick && downstreamPick.pickedTeamId === oldTeamId) {
           picks.delete(slot);
         }
       }

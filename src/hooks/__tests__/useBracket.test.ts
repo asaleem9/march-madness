@@ -73,13 +73,23 @@ describe("useBracketStore", () => {
   });
 
   describe("clearDownstreamPicks", () => {
-    it("clears next game slot pick", () => {
+    it("clears next game slot pick when it matches old team", () => {
       const games = buildGameChain();
       useBracketStore.getState().setPick(1, "first_round", 101);
       useBracketStore.getState().setPick(5, "second_round", 101);
 
-      useBracketStore.getState().clearDownstreamPicks(1, games);
+      useBracketStore.getState().clearDownstreamPicks(1, 101, games);
       expect(useBracketStore.getState().picks.has(5)).toBe(false);
+    });
+
+    it("does not clear downstream pick for a different team", () => {
+      const games = buildGameChain();
+      useBracketStore.getState().setPick(1, "first_round", 101);
+      useBracketStore.getState().setPick(5, "second_round", 202); // picked the other team
+
+      useBracketStore.getState().clearDownstreamPicks(1, 101, games);
+      // Slot 5 pick was for team 202, not 101 — should NOT be cleared
+      expect(useBracketStore.getState().picks.has(5)).toBe(true);
     });
 
     it("clears recursively through multiple rounds", () => {
@@ -88,7 +98,7 @@ describe("useBracketStore", () => {
       useBracketStore.getState().setPick(5, "second_round", 101);
       useBracketStore.getState().setPick(7, "sweet_16", 101);
 
-      useBracketStore.getState().clearDownstreamPicks(1, games);
+      useBracketStore.getState().clearDownstreamPicks(1, 101, games);
       expect(useBracketStore.getState().picks.has(5)).toBe(false);
       expect(useBracketStore.getState().picks.has(7)).toBe(false);
     });
@@ -99,10 +109,7 @@ describe("useBracketStore", () => {
       useBracketStore.getState().setPick(3, "first_round", 301);
       useBracketStore.getState().setPick(6, "second_round", 301);
 
-      useBracketStore.getState().clearDownstreamPicks(1, games);
-      // Slot 6 is in a different branch (fed by slots 3 & 4)
-      // But clearDownstreamPicks from slot 1 goes: 1 → 5 → 7
-      // Slot 6 should still exist
+      useBracketStore.getState().clearDownstreamPicks(1, 101, games);
       expect(useBracketStore.getState().picks.has(6)).toBe(true);
       expect(useBracketStore.getState().picks.has(3)).toBe(true);
     });
@@ -111,15 +118,14 @@ describe("useBracketStore", () => {
       const games = buildGameChain();
       useBracketStore.getState().setPick(7, "sweet_16", 101);
 
-      useBracketStore.getState().clearDownstreamPicks(7, games);
-      // Slot 7 has nextGameSlot: null, so nothing downstream to clear
+      useBracketStore.getState().clearDownstreamPicks(7, 101, games);
       expect(useBracketStore.getState().picks.has(7)).toBe(true);
     });
 
     it("works with empty picks map (no crash)", () => {
       const games = buildGameChain();
       expect(() => {
-        useBracketStore.getState().clearDownstreamPicks(1, games);
+        useBracketStore.getState().clearDownstreamPicks(1, 101, games);
       }).not.toThrow();
     });
   });
