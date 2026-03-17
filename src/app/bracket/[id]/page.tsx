@@ -57,6 +57,21 @@ export default async function BracketPage({ params }: Props) {
     )
     .order("game_slot");
 
+  function mapTeam(t: Record<string, unknown> | null) {
+    if (!t) return null;
+    return {
+      id: t.id as number,
+      name: t.name as string,
+      abbreviation: t.abbreviation as string,
+      seed: t.seed as number,
+      region: t.region as GameWithTeams["region"],
+      record: t.record as string,
+      logoUrl: (t.logo_url as string) || null,
+      eliminated: t.eliminated as boolean,
+      espnId: (t.espn_id as string) || null,
+    };
+  }
+
   const formattedGames: GameWithTeams[] = (games || []).map((g) => ({
     id: g.id,
     round: g.round,
@@ -72,9 +87,9 @@ export default async function BracketPage({ params }: Props) {
     scheduledAt: g.scheduled_at,
     status: g.status,
     espnGameId: g.espn_game_id,
-    teamA: g.team_a || null,
-    teamB: g.team_b || null,
-    winner: g.winner || null,
+    teamA: mapTeam(g.team_a as Record<string, unknown> | null),
+    teamB: mapTeam(g.team_b as Record<string, unknown> | null),
+    winner: mapTeam(g.winner as Record<string, unknown> | null),
   }));
 
   const existingPicks = (picks || []).map((p) => ({
