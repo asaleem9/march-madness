@@ -1,7 +1,7 @@
 "use client";
 
 import type { Region, GameWithTeams, Team } from "@/types";
-import { GameSlot } from "./GameSlot";
+import { GameSlot, type FirstFourHint } from "./GameSlot";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
 
 interface RegionBracketProps {
@@ -23,27 +23,29 @@ export function RegionBracket({
   isEditable,
   onPick,
 }: RegionBracketProps) {
-  // Get First Four games for this region
-  const firstFourGames = games
-    .filter((g) => g.round === "first_four" && g.region === region)
-    .sort((a, b) => a.gameSlot - b.gameSlot);
-
-  // Build map: next_game_slot -> { teams, position }
-  // So First Round games know which First Four teams feed into them
-  const firstFourFeeds = new Map<
+  // Build First Four hints: map from next_game_slot -> hint info
+  // The hint shows "TEX / NCST" as a single clickable option
+  const firstFourHints = new Map<
     number,
-    { teams: [Team, Team]; position: string | null }
+    { hint: FirstFourHint; position: string | null }
   >();
+  const firstFourGames = games.filter(
+    (g) => g.round === "first_four" && g.region === region
+  );
   for (const ffGame of firstFourGames) {
     if (ffGame.nextGameSlot && ffGame.teamA && ffGame.teamB) {
-      firstFourFeeds.set(ffGame.nextGameSlot, {
-        teams: [ffGame.teamA, ffGame.teamB],
+      firstFourHints.set(ffGame.nextGameSlot, {
+        hint: {
+          teamAName: ffGame.teamA.abbreviation,
+          teamBName: ffGame.teamB.abbreviation,
+          pickTeamId: ffGame.teamA.id, // convention: store team_a as the pick
+        },
         position: ffGame.slotPosition,
       });
     }
   }
 
-  // Group games by round
+  // Group games by round (First Four excluded — handled via hints)
   const roundOrder = [
     "first_round",
     "second_round",
@@ -63,7 +65,6 @@ export function RegionBracket({
         {REGION_DISPLAY_NAMES[region]} Region
       </div>
 
-      {/* Main bracket rounds */}
       <div className="flex gap-3 overflow-x-auto pb-4">
         {gamesByRound.map((roundGames, roundIndex) => (
           <div key={roundOrder[roundIndex]} className="flex flex-col gap-2">
@@ -79,16 +80,15 @@ export function RegionBracket({
                 const teamA = resolved?.teamA ?? game.teamA;
                 const teamB = resolved?.teamB ?? game.teamB;
 
-                // For First Round games fed by First Four: pass both FF teams
-                // so the user can pick directly without a separate FF step
-                const ffInfo = firstFourFeeds.get(game.gameSlot);
-                const ffTeamsA =
+                // Show FF hint on the TBD slot (only when team hasn't resolved yet)
+                const ffInfo = firstFourHints.get(game.gameSlot);
+                const hintA =
                   !teamA && ffInfo && ffInfo.position === "top"
-                    ? ffInfo.teams
+                    ? ffInfo.hint
                     : undefined;
-                const ffTeamsB =
+                const hintB =
                   !teamB && ffInfo && ffInfo.position === "bottom"
-                    ? ffInfo.teams
+                    ? ffInfo.hint
                     : undefined;
 
                 return (
@@ -102,8 +102,8 @@ export function RegionBracket({
                     isEditable={isEditable}
                     isCorrect={pickResults.get(game.gameSlot) ?? null}
                     onPick={onPick}
-                    firstFourTeamsA={ffTeamsA}
-                    firstFourTeamsB={ffTeamsB}
+                    firstFourHintA={hintA}
+                    firstFourHintB={hintB}
                   />
                 );
               })}
