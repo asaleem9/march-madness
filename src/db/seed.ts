@@ -182,14 +182,21 @@ function buildGameSlots(): GameSeed[] {
   }
 
   // Elite Eight (slots 61-64, 1 game per region)
+  // 2026 Final Four pairings: East vs South (slot 65), West vs Midwest (slot 66)
+  const eliteToFinalFour: Record<number, { next: number; pos: string }> = {
+    0: { next: 65, pos: "top" },    // east -> 65 top
+    1: { next: 66, pos: "top" },    // west -> 66 top
+    2: { next: 65, pos: "bottom" }, // south -> 65 bottom
+    3: { next: 66, pos: "bottom" }, // midwest -> 66 bottom
+  };
   for (let r = 0; r < 4; r++) {
-    const finalFourSlot = 65 + Math.floor(r / 2);
+    const mapping = eliteToFinalFour[r];
     games.push({
       game_slot: slot,
       round: "elite_eight",
       region: regions[r],
-      next_game_slot: finalFourSlot,
-      slot_position: r % 2 === 0 ? "top" : "bottom",
+      next_game_slot: mapping.next,
+      slot_position: mapping.pos,
       scheduled_at: r < 2 ? "2026-03-28T18:00:00Z" : "2026-03-29T18:00:00Z",
     });
     slot++;
