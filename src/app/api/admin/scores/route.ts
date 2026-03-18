@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRoundPoints, isUpset } from "@/lib/utils";
+import { sanitizeError } from "@/lib/sanitizeError";
 
 const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim());
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     .eq("id", game_id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
   }
 
   // If final, process results (same logic as cron)

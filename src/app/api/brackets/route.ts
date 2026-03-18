@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sanitizeError } from "@/lib/sanitizeError";
 
 const REQUIRED_PICKS = 63;
 
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   if (bracketError) {
     return NextResponse.json(
-      { error: bracketError.message },
+      { error: sanitizeError(bracketError.message) },
       { status: 500 }
     );
   }
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
       // Rollback bracket
       await admin.from("brackets").delete().eq("id", bracket.id);
       return NextResponse.json(
-        { error: picksError.message },
+        { error: sanitizeError(picksError.message) },
         { status: 500 }
       );
     }
@@ -135,14 +136,10 @@ export async function PUT(request: NextRequest) {
     .update(updateFields)
     .eq("id", bracketId);
 
-  // Replace all picks (use admin client to bypass RLS deadline check)
+  // Replace picks atomically (use admin client to bypass RLS deadline check)
   if (picks && picks.length > 0) {
     const admin = createAdminClient();
 
-    // Delete existing picks
-    await admin.from("bracket_picks").delete().eq("bracket_id", bracketId);
-
-    // Insert new picks
     const pickRows = picks.map(
       (p: { game_slot: number; round: string; picked_team_id: number }) => ({
         bracket_id: bracketId,
@@ -151,12 +148,25 @@ export async function PUT(request: NextRequest) {
         picked_team_id: p.picked_team_id,
       })
     );
+    const newGameSlots = picks.map(
+      (p: { game_slot: number }) => p.game_slot
+    );
 
-    const { error } = await admin.from("bracket_picks").insert(pickRows);
+    // Upsert new picks (safe — doesn't delete anything on failure)
+    const { error: upsertError } = await admin
+      .from("bracket_picks")
+      .upsert(pickRows, { onConflict: "bracket_id,game_slot" });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (upsertError) {
+      return NextResponse.json({ error: sanitizeError(upsertError.message) }, { status: 500 });
     }
+
+    // Remove any stale picks not in the new set
+    await admin
+      .from("bracket_picks")
+      .delete()
+      .eq("bracket_id", bracketId)
+      .not("game_slot", "in", `(${newGameSlots.join(",")})`);
   }
 
   // Lock only after picks saved successfully

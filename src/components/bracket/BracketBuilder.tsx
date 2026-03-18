@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useBracketStore } from "@/hooks/useBracket";
 import { BracketView } from "./BracketView";
 import type { GameWithTeams, Team, Region } from "@/types";
@@ -98,6 +98,7 @@ export function BracketBuilder({
   score = 0,
 }: BracketBuilderProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     picks,
     bracketName,
@@ -108,10 +109,12 @@ export function BracketBuilder({
     clearDownstreamPicks,
   } = useBracketStore();
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [currentStep, setCurrentStep] = useState<Step>("east");
   const [finalized, setFinalized] = useState(false);
+  const [showConfirmFinalize, setShowConfirmFinalize] = useState(false);
 
   const isEditable = isOwner && !isLocked && !finalized;
 
@@ -132,6 +135,14 @@ export function BracketBuilder({
       setBracketName(defaultName);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show success message when redirected after first save
+  useEffect(() => {
+    if (searchParams.get("saved") === "1") {
+      setSuccess("Bracket saved!");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [searchParams]);
 
   const teamMap = useMemo(() => buildTeamMap(games), [games]);
 
@@ -198,6 +209,8 @@ export function BracketBuilder({
     }));
 
   const handleSave = async (lock: boolean) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError("");
     setSuccess("");
@@ -218,12 +231,16 @@ export function BracketBuilder({
 
       if (!response.ok) {
         const data = await response.json();
+        if (response.status === 409 && data.bracketId) {
+          router.push(`/bracket/${data.bracketId}`);
+          return;
+        }
         throw new Error(data.error || "Failed to save bracket");
       }
 
       const data = await response.json();
       if (!bracketId) {
-        router.push(`/bracket/${data.bracketId}`);
+        router.push(`/bracket/${data.bracketId}?saved=1`);
       } else if (lock) {
         setFinalized(true);
         router.refresh();
@@ -240,6 +257,7 @@ export function BracketBuilder({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -325,7 +343,7 @@ export function BracketBuilder({
                 {saving ? "Saving..." : "Save Draft"}
               </button>
               <button
-                onClick={() => handleSave(true)}
+                onClick={() => setShowConfirmFinalize(true)}
                 disabled={saving || !allPicksMade}
                 className="retro-btn retro-btn-primary disabled:opacity-50"
                 title={
@@ -427,6 +445,40 @@ export function BracketBuilder({
           {currentStepIndex < STEPS.length - 1 ? STEP_LABELS[STEPS[currentStepIndex + 1]].toUpperCase() : ""} &rarr;
         </button>
       </div>
+
+      {/* Finalize confirmation dialog */}
+      {showConfirmFinalize && (
+        <div className="fixed inset-0 bg-navy/70 flex items-center justify-center z-50 p-4">
+          <div className="retro-card bg-cream max-w-md w-full p-6 space-y-4 border-4 border-navy">
+            <h2 className="font-display text-[0.6rem] text-navy text-center">
+              FINALIZE BRACKET?
+            </h2>
+            <p className="font-body text-sm text-navy/80 text-center">
+              This will lock your bracket permanently. You will not be able to
+              change any picks after finalizing.
+            </p>
+            <div className="flex gap-3 justify-center pt-2">
+              <button
+                onClick={() => setShowConfirmFinalize(false)}
+                disabled={saving}
+                className="retro-btn retro-btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmFinalize(false);
+                  handleSave(true);
+                }}
+                disabled={saving}
+                className="retro-btn retro-btn-primary"
+              >
+                {saving ? "Finalizing..." : "Lock It In"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sanitizeError } from "@/lib/sanitizeError";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
   }
 
   // Queue notification for opponent
@@ -131,7 +132,7 @@ export async function PATCH(request: NextRequest) {
       .eq("id", wager_id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
     }
   } else if (action === "decline") {
     if (wager.opponent_id !== user.id) {

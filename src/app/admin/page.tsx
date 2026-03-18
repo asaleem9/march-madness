@@ -23,6 +23,7 @@ export default function AdminPage() {
   const [games, setGames] = useState<GameForAdmin[]>([]);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [updating, setUpdating] = useState<number | null>(null);
   const [selectedGame, setSelectedGame] = useState<number | null>(null);
   const [scoreA, setScoreA] = useState("");
@@ -47,8 +48,13 @@ export default function AdminPage() {
 
       setGames((gamesData as GameForAdmin[]) || []);
 
-      // Fetch config
+      // Fetch config (also serves as admin check — returns 403 if not admin)
       const configRes = await fetch("/api/admin/config");
+      if (configRes.status === 403) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
       if (configRes.ok) {
         setConfig(await configRes.json());
       }
@@ -120,6 +126,19 @@ export default function AdminPage() {
         <span className="font-display text-xs text-navy/50 animate-pulse">
           Loading...
         </span>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-8 text-center">
+        <div className="retro-card p-8 max-w-md mx-auto">
+          <h1 className="font-display text-navy text-sm mb-4">ACCESS DENIED</h1>
+          <p className="font-body text-sm text-navy/70">
+            You don&apos;t have permission to view this page.
+          </p>
+        </div>
       </div>
     );
   }
