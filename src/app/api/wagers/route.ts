@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -89,14 +90,15 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json();
   const { wager_id, action, bracket_id } = body;
 
-  // Fetch wager
-  const { data: wager } = await supabase
+  // Fetch wager (use admin to bypass RLS for challenger revoke)
+  const admin = createAdminClient();
+  const { data: wager } = await admin
     .from("wagers")
     .select("*")
     .eq("id", wager_id)
     .single();
 
-  if (!wager || wager.opponent_id !== user.id) {
+  if (!wager) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -107,8 +109,20 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  if (action === "accept") {
-    const { error } = await supabase
+  // Challenger can revoke, opponent can accept/decline
+  if (action === "revoke") {
+    if (wager.challenger_id !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    await admin
+      .from("wagers")
+      .update({ status: "declined" })
+      .eq("id", wager_id);
+  } else if (action === "accept") {
+    if (wager.opponent_id !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const { error } = await admin
       .from("wagers")
       .update({
         status: "accepted",
@@ -120,7 +134,10 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
   } else if (action === "decline") {
-    await supabase
+    if (wager.opponent_id !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    await admin
       .from("wagers")
       .update({ status: "declined" })
       .eq("id", wager_id);

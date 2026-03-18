@@ -113,7 +113,7 @@ export default function WagersPage() {
     }
   };
 
-  const handleRespond = async (wagerId: string, action: "accept" | "decline") => {
+  const handleRespond = async (wagerId: string, action: "accept" | "decline" | "revoke") => {
     const body: Record<string, string> = { wager_id: wagerId, action };
     if (action === "accept" && bracketId) {
       body.bracket_id = bracketId;
@@ -129,7 +129,7 @@ export default function WagersPage() {
       setWagers((prev) =>
         prev.map((w) =>
           w.id === wagerId
-            ? { ...w, status: action === "accept" ? "accepted" : "declined" }
+            ? { ...w, status: action === "accept" ? "accepted" : action === "revoke" ? "declined" : "declined" }
             : w
         )
       );
@@ -309,6 +309,16 @@ export default function WagersPage() {
                     className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream"
                   >
                     Decline
+                  </button>
+                </div>
+              )}
+              {wager.status === "pending" && isChallenger && (
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => handleRespond(wager.id, "revoke")}
+                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange"
+                  >
+                    Revoke
                   </button>
                 </div>
               )}
