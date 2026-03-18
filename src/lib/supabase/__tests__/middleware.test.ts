@@ -5,17 +5,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGetUser = vi.fn();
 
-vi.mock("@supabase/ssr", () => ({
-  createServerClient: vi.fn(() => ({
-    auth: {
-      getUser: mockGetUser,
-    },
-  })),
-}));
-
 // Track cookies set on responses
 let responseCookies: Map<string, { value: string; options?: unknown }>;
 let setAllCallback: ((cookies: Array<{ name: string; value: string; options?: unknown }>) => void) | null;
+
+vi.mock("@supabase/ssr", () => ({
+  createServerClient: vi.fn((_url: string, _key: string, options: { cookies: { setAll: typeof setAllCallback } }) => {
+    setAllCallback = options.cookies.setAll;
+    return {
+      auth: {
+        getUser: mockGetUser,
+      },
+    };
+  }),
+}));
 
 vi.mock("next/server", () => {
   const createMockResponse = (type: "next" | "redirect", url?: URL) => {
@@ -46,20 +49,6 @@ vi.mock("next/server", () => {
       next: vi.fn(({ request: _request } = {}) => createMockResponse("next")),
       redirect: vi.fn((url: URL) => createMockResponse("redirect", url)),
     },
-  };
-});
-
-// Capture the setAll callback from createServerClient calls
-vi.mock("@supabase/ssr", async () => {
-  return {
-    createServerClient: vi.fn((_url: string, _key: string, options: { cookies: { setAll: typeof setAllCallback } }) => {
-      setAllCallback = options.cookies.setAll;
-      return {
-        auth: {
-          getUser: mockGetUser,
-        },
-      };
-    }),
   };
 });
 
