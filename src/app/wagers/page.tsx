@@ -133,6 +133,9 @@ export default function WagersPage() {
             : w
         )
       );
+    } else {
+      const data = await response.json().catch(() => null);
+      alert(data?.error || "Something went wrong. Try again.");
     }
   };
 
@@ -261,36 +264,12 @@ export default function WagersPage() {
 
           return (
             <div key={wager.id} className="retro-card p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-body text-sm font-bold mb-1">
-                    {wager.stakes}
-                  </div>
-                  <div className="text-xs text-navy/60">
-                    {isChallenger ? "You challenged" : "Challenged by"}{" "}
-                    <span className="font-bold">{otherPlayer}</span>
-                  </div>
-                  <div className="text-[0.55rem] text-navy/40 mt-1">
-                    {new Date(wager.created_at).toLocaleDateString()}
-                  </div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs text-navy/60">
+                  {isChallenger ? "You challenged" : "Challenged by"}{" "}
+                  <span className="font-bold">{otherPlayer}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isPending && (
-                    <>
-                      <button
-                        onClick={() => handleRespond(wager.id, "accept")}
-                        className="retro-btn retro-btn-secondary text-[0.45rem] py-1 px-3"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleRespond(wager.id, "decline")}
-                        className="retro-btn text-[0.45rem] py-1 px-3 bg-cream"
-                      >
-                        Decline
-                      </button>
-                    </>
-                  )}
                   {wager.status === "resolved" && (
                     <span
                       className={`font-display text-[0.5rem] px-2 py-1 rounded ${
@@ -307,7 +286,34 @@ export default function WagersPage() {
                       DECLINED
                     </span>
                   )}
+                  {wager.status === "accepted" && (
+                    <span className="font-display text-[0.5rem] text-forest">
+                      ACTIVE
+                    </span>
+                  )}
                 </div>
+              </div>
+              <div className="font-body text-sm font-bold mb-2">
+                {wager.stakes}
+              </div>
+              {isPending && (
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => handleRespond(wager.id, "accept")}
+                    className="retro-btn retro-btn-secondary text-[0.45rem] py-1.5 px-4"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => handleRespond(wager.id, "decline")}
+                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream"
+                  >
+                    Decline
+                  </button>
+                </div>
+              )}
+              <div className="text-[0.55rem] text-navy/40 mt-2">
+                {new Date(wager.created_at).toLocaleDateString()}
               </div>
             </div>
           );
