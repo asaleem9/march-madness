@@ -37,16 +37,7 @@ export default async function BracketPage({ params }: Props) {
     .select("*")
     .eq("bracket_id", id);
 
-  // Check lock status
-  const { data: config } = await adminSupabase
-    .from("tournament_config")
-    .select("*")
-    .eq("id", 1)
-    .single();
-
-  const isLocked =
-    bracket.locked ||
-    (config ? new Date() > new Date(config.bracket_lock_deadline) : false);
+  const isLocked = bracket.locked;
 
   // Fetch all games with teams
   const { data: games } = await adminSupabase

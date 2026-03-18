@@ -11,21 +11,6 @@ export default async function NewBracketPage() {
 
   if (!user) redirect("/login");
 
-  // Check if brackets are locked
-  const { data: config } = await supabase
-    .from("tournament_config")
-    .select("*")
-    .eq("id", 1)
-    .single();
-
-  const isLocked = config
-    ? new Date() > new Date(config.bracket_lock_deadline)
-    : false;
-
-  if (isLocked) {
-    redirect("/dashboard");
-  }
-
   // Enforce one bracket per user — redirect to existing bracket
   const { data: existingBracket } = await supabase
     .from("brackets")
@@ -97,7 +82,7 @@ export default async function NewBracketPage() {
       </h1>
       <BracketBuilder
         games={formattedGames}
-        isLocked={isLocked}
+        isLocked={false}
         isOwner={true}
         defaultName={defaultBracketName}
       />
