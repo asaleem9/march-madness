@@ -58,10 +58,13 @@ export default async function LeaderboardPage() {
                 display_name: string;
                 avatar_url: string | null;
               };
-              const rank =
-                index > 0 && brackets[index - 1].score === bracket.score
-                  ? ""
-                  : `#${index + 1}`;
+              // Tied players share the same rank number
+              let rankNum = index + 1;
+              for (let i = index - 1; i >= 0; i--) {
+                if (brackets[i].score === bracket.score) rankNum = i + 1;
+                else break;
+              }
+              const rank = `#${rankNum}`;
               const userAchievements =
                 achievementsByUser.get(profile.id) || [];
 
