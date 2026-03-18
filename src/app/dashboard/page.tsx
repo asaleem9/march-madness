@@ -100,11 +100,15 @@ export default async function DashboardPage() {
                       <div className="text-[0.55rem] text-navy/50">points</div>
                     </div>
                   </div>
-                  {bracket.locked && (
-                    <span className="text-[0.5rem] text-navy/40 mt-1 block">
-                      Locked
-                    </span>
-                  )}
+                  <span
+                    className={`text-[0.5rem] font-display mt-1 block ${
+                      bracket.locked
+                        ? "text-forest"
+                        : "text-burnt-orange"
+                    }`}
+                  >
+                    {bracket.locked ? "FINALIZED" : "DRAFT"}
+                  </span>
                 </Link>
               ))}
             </div>
