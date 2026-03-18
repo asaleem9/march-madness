@@ -12,6 +12,7 @@ export default async function LeaderboardPage() {
     .from("brackets")
     .select("*, profiles!inner(id, display_name, avatar_url)")
     .eq("is_primary", true)
+    .eq("locked", true)
     .order("score", { ascending: false });
 
   // Fetch achievements for badge display

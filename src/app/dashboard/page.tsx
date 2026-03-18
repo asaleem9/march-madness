@@ -37,6 +37,7 @@ export default async function DashboardPage() {
     .from("brackets")
     .select("*, profiles!inner(display_name, avatar_url)")
     .eq("is_primary", true)
+    .eq("locked", true)
     .order("score", { ascending: false })
     .limit(5);
 
