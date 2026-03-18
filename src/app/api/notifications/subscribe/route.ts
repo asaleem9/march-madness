@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { sanitizeError } from "@/lib/sanitizeError";
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   );
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

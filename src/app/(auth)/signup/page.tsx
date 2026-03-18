@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
+  );
+}
+
+function SignupForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -13,6 +21,8 @@ export default function SignupPage() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get("redirect") || "/dashboard";
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -26,7 +36,7 @@ export default function SignupPage() {
       return;
     }
 
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -40,17 +50,44 @@ export default function SignupPage() {
       return;
     }
 
-    router.push("/dashboard");
+    if (data.session) {
+      router.push(redirect);
+    } else {
+      setSuccess(true);
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignup = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/callback?redirect=/dashboard`,
+        redirectTo: `${window.location.origin}/callback?redirect=${redirect}`,
       },
     });
   };
+
+  if (success) {
+    return (
+      <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">
+        <div className="retro-card p-8 w-full max-w-md text-center">
+          <h1 className="font-display text-navy text-sm mb-4">
+            CHECK YOUR EMAIL
+          </h1>
+          <p className="font-body text-sm text-navy/80">
+            We sent a confirmation link to <strong>{email}</strong>. Click the
+            link to activate your account, then log in.
+          </p>
+          <Link
+            href="/login"
+            className="retro-btn retro-btn-primary inline-block mt-6"
+          >
+            Go to Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">

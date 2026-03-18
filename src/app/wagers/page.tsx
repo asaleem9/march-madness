@@ -35,6 +35,9 @@ export default function WagersPage() {
     "pending" | "accepted" | "resolved"
   >("pending");
   const [loading, setLoading] = useState(true);
+  const [createError, setCreateError] = useState("");
+  const [wagerDeadline, setWagerDeadline] = useState<string | null>(null);
+  const [showRevokeConfirm, setShowRevokeConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -79,6 +82,16 @@ export default function WagersPage() {
         );
       }
 
+      // Fetch wager deadline
+      const { data: configData } = await supabase
+        .from("tournament_config")
+        .select("wager_creation_deadline")
+        .eq("id", 1)
+        .single();
+      if (configData?.wager_creation_deadline) {
+        setWagerDeadline(configData.wager_creation_deadline);
+      }
+
       setLoading(false);
     }
     load();
@@ -87,6 +100,7 @@ export default function WagersPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!opponentId || !bracketId || !stakes) return;
+    setCreateError("");
 
     const response = await fetch("/api/wagers", {
       method: "POST",
@@ -110,6 +124,9 @@ export default function WagersPage() {
         .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
         .order("created_at", { ascending: false });
       setWagers((data as Wager[]) || []);
+    } else {
+      const data = await response.json().catch(() => null);
+      setCreateError(data?.error || "Failed to create wager. Please try again.");
     }
   };
 
@@ -166,9 +183,18 @@ export default function WagersPage() {
         </button>
       </div>
 
-      <p className="text-xs text-navy/50 mb-6">
+      <p className="text-xs text-navy/50 mb-4">
         Challenge a friend to a friendly IOU wager. Whoever&apos;s bracket scores higher wins. Stakes are just for fun — loser honors the bet.
       </p>
+
+      {wagerDeadline && (
+        <div className="text-[0.55rem] font-display text-navy/50 mb-6">
+          WAGER DEADLINE: {new Date(wagerDeadline).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+          {new Date() > new Date(wagerDeadline) && (
+            <span className="text-burnt-orange ml-2">— CLOSED</span>
+          )}
+        </div>
+      )}
 
       {/* Create wager form */}
       {showCreate && (
@@ -176,6 +202,16 @@ export default function WagersPage() {
           onSubmit={handleCreate}
           className="retro-card p-6 mb-6 space-y-4"
         >
+          {createError && (
+            <div className="bg-burnt-orange/10 border-2 border-burnt-orange text-burnt-orange text-xs p-3 rounded">
+              {createError}
+            </div>
+          )}
+          {brackets.length === 0 && (
+            <div className="bg-gold/20 border-2 border-gold text-navy text-xs p-3 rounded">
+              You need to <a href="/bracket/new" className="text-burnt-orange font-bold hover:underline">create a bracket</a> before you can wager.
+            </div>
+          )}
           <div>
             <label className="font-display text-[0.55rem] text-navy block mb-2">
               CHALLENGE
@@ -203,7 +239,9 @@ export default function WagersPage() {
               onChange={(e) => setBracketId(e.target.value)}
               className="w-full border-2 border-navy p-2 font-body text-sm bg-cream"
               required
+              disabled={brackets.length === 0}
             >
+              {brackets.length === 0 && <option value="">No brackets available</option>}
               {brackets.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name} {b.is_primary ? "(Primary)" : ""}
@@ -224,7 +262,11 @@ export default function WagersPage() {
               required
             />
           </div>
-          <button type="submit" className="retro-btn retro-btn-secondary">
+          <button
+            type="submit"
+            className="retro-btn retro-btn-secondary"
+            disabled={brackets.length === 0}
+          >
             Send Challenge
           </button>
         </form>
@@ -315,11 +357,7 @@ export default function WagersPage() {
               {wager.status === "pending" && isChallenger && (
                 <div className="flex gap-2 mt-3">
                   <button
-                    onClick={() => {
-                      if (confirm(`Revoke your wager "${wager.stakes}" with ${otherPlayer}? This can't be undone.`)) {
-                        handleRespond(wager.id, "revoke");
-                      }
-                    }}
+                    onClick={() => setShowRevokeConfirm(wager.id)}
                     className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange"
                   >
                     Revoke
@@ -333,6 +371,45 @@ export default function WagersPage() {
           );
         })}
       </div>
+
+      {/* Revoke confirmation modal */}
+      {showRevokeConfirm && (() => {
+        const wager = wagers.find((w) => w.id === showRevokeConfirm);
+        if (!wager) return null;
+        const otherPlayer = wager.challenger_id === userId
+          ? wager.opponent?.display_name
+          : wager.challenger?.display_name;
+        return (
+          <div className="fixed inset-0 bg-navy/70 flex items-center justify-center z-50 p-4">
+            <div className="retro-card bg-cream max-w-md w-full p-6 space-y-4 border-4 border-navy">
+              <h2 className="font-display text-[0.6rem] text-navy text-center">
+                REVOKE WAGER?
+              </h2>
+              <p className="font-body text-sm text-navy/80 text-center">
+                Revoke your wager &ldquo;{wager.stakes}&rdquo; with{" "}
+                <strong>{otherPlayer}</strong>? This can&apos;t be undone.
+              </p>
+              <div className="flex gap-3 justify-center pt-2">
+                <button
+                  onClick={() => setShowRevokeConfirm(null)}
+                  className="retro-btn retro-btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    handleRespond(wager.id, "revoke");
+                    setShowRevokeConfirm(null);
+                  }}
+                  className="retro-btn retro-btn-primary bg-burnt-orange border-burnt-orange"
+                >
+                  Revoke It
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

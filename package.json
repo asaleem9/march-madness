@@ -13,7 +13,11 @@
     "db:clear": "npx tsx scripts/clear-db.ts",
     "generate-vapid": "npx tsx scripts/generate-vapid-keys.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:api": "vitest run --testPathPattern='api.*test'",
+    "test:components": "vitest run --testPathPattern='components.*test'",
+    "test:middleware": "vitest run --testPathPattern='middleware.*test'",
+    "test:all": "vitest run"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.436",
