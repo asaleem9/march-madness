@@ -148,12 +148,11 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  // Update bracket name and lock status
+  // Update bracket name (lock status set after picks succeed)
   const updateFields: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
   if (name) updateFields.name = name;
-  if (lock) updateFields.locked = true;
 
   await supabase
     .from("brackets")
@@ -180,6 +179,14 @@ export async function PUT(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+  }
+
+  // Lock only after picks saved successfully
+  if (lock) {
+    await supabase
+      .from("brackets")
+      .update({ locked: true })
+      .eq("id", bracketId);
   }
 
   return NextResponse.json({ bracketId, locked: !!lock });
