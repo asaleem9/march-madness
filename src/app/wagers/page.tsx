@@ -315,7 +315,11 @@ export default function WagersPage() {
               {wager.status === "pending" && isChallenger && (
                 <div className="flex gap-2 mt-3">
                   <button
-                    onClick={() => handleRespond(wager.id, "revoke")}
+                    onClick={() => {
+                      if (confirm(`Revoke your wager "${wager.stakes}" with ${otherPlayer}? This can't be undone.`)) {
+                        handleRespond(wager.id, "revoke");
+                      }
+                    }}
                     className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange"
                   >
                     Revoke
