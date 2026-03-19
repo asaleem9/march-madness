@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -19,27 +20,32 @@ export default function ProfilePage() {
   const [message, setMessage] = useState("");
   const [achievements, setAchievements] = useState<string[]>([]);
 
-  const achievementInfo: Record<string, { label: string; description: string }> =
+  const achievementInfo: Record<string, { label: string; description: string; icon: string }> =
     {
       cinderella: {
         label: "Cinderella Story",
         description: "Correctly picked a 12+ seed upset",
+        icon: "/images/badges/cinderella.png",
       },
       perfect_region: {
         label: "Perfect Region",
         description: "Got every pick right in a region",
+        icon: "/images/badges/perfect-region.png",
       },
       chalk_walk: {
         label: "Chalk Walk",
         description: "Picked all higher seeds",
+        icon: "/images/badges/chalk-walk.png",
       },
       bracket_genius: {
         label: "Bracket Genius",
         description: "Top 3 overall finish",
+        icon: "/images/badges/bracket-genius.png",
       },
       fortune_teller: {
         label: "Fortune Teller",
         description: "Correctly predicted the champion",
+        icon: "/images/badges/fortune-teller.png",
       },
     };
 
@@ -311,13 +317,24 @@ export default function ProfilePage() {
             {achievements.map((type) => (
               <div
                 key={type}
-                className="border-2 border-gold bg-gold/10 p-3 rounded"
+                className="border-2 border-gold bg-gold/10 p-3 rounded flex items-center gap-3"
               >
-                <div className="font-display text-[0.55rem] text-gold">
-                  {achievementInfo[type]?.label || type}
-                </div>
-                <div className="text-[0.55rem] text-navy/60 mt-1">
-                  {achievementInfo[type]?.description}
+                {achievementInfo[type]?.icon && (
+                  <Image
+                    src={achievementInfo[type].icon}
+                    alt={achievementInfo[type].label}
+                    width={48}
+                    height={48}
+                    className="rounded shrink-0"
+                  />
+                )}
+                <div>
+                  <div className="font-display text-[0.55rem] text-gold">
+                    {achievementInfo[type]?.label || type}
+                  </div>
+                  <div className="text-[0.55rem] text-navy/60 mt-1">
+                    {achievementInfo[type]?.description}
+                  </div>
                 </div>
               </div>
             ))}

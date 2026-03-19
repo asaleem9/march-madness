@@ -1,11 +1,9 @@
-"use client";
-
-import { FaBasketballBall, FaTrophy, FaChartLine } from "react-icons/fa";
+import Image from "next/image";
 
 const icons = {
-  basketball: FaBasketballBall,
-  trophy: FaTrophy,
-  chart: FaChartLine,
+  basketball: { src: "/images/features/pick-winners.png", alt: "Pick your winners" },
+  trophy: { src: "/images/features/challenge-friends.png", alt: "Challenge friends" },
+  chart: { src: "/images/features/track-results.png", alt: "Track live results" },
 } as const;
 
 export default function FeatureIcon({
@@ -13,10 +11,16 @@ export default function FeatureIcon({
 }: {
   icon: keyof typeof icons;
 }) {
-  const Icon = icons[icon];
+  const { src, alt } = icons[icon];
   return (
     <div className="flex justify-center mb-4">
-      <Icon className="text-3xl text-burnt-orange" />
+      <Image
+        src={src}
+        alt={alt}
+        width={80}
+        height={80}
+        className="rounded"
+      />
     </div>
   );
 }

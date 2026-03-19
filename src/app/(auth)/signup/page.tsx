@@ -69,8 +69,16 @@ function SignupForm() {
 
   if (success) {
     return (
-      <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">
-        <div className="retro-card p-8 w-full max-w-md text-center">
+      <div
+        className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4 relative"
+        style={{
+          backgroundImage: "url(/images/auth-bg.png)",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
+        <div className="absolute inset-0 bg-cream/90" />
+        <div className="retro-card p-8 w-full max-w-md text-center relative z-10">
           <h1 className="font-display text-navy text-sm mb-4">
             CHECK YOUR EMAIL
           </h1>
@@ -90,8 +98,16 @@ function SignupForm() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4">
-      <div className="retro-card p-8 w-full max-w-md">
+    <div
+      className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4 relative"
+      style={{
+        backgroundImage: "url(/images/auth-bg.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      <div className="absolute inset-0 bg-cream/90" />
+      <div className="retro-card p-8 w-full max-w-md relative z-10">
         <h1 className="font-display text-navy text-sm text-center mb-8">
           SIGN UP
         </h1>
