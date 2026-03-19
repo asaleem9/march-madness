@@ -11,23 +11,33 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const today = formatDateForESPN(new Date());
+  const now = new Date();
+  const today = formatDateForESPN(now);
+  const yesterday = formatDateForESPN(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
-  // Fetch ESPN scoreboard
-  const scoreboard = await fetchESPNScoreboard(today);
+  // Fetch ESPN scoreboard for today AND yesterday (catches late-finishing games)
+  const [scoreboardToday, scoreboardYesterday] = await Promise.all([
+    fetchESPNScoreboard(today),
+    fetchESPNScoreboard(yesterday),
+  ]);
 
-  if (!scoreboard) {
+  if (!scoreboardToday && !scoreboardYesterday) {
     return NextResponse.json(
       { message: "ESPN fetch failed, will retry next cycle" },
       { status: 200 }
     );
   }
 
+  const allEvents = [
+    ...(scoreboardYesterday?.events || []),
+    ...(scoreboardToday?.events || []),
+  ];
+
   let gamesUpdated = 0;
   let scoresRecalculated = 0;
   let gamesDiscovered = 0;
 
-  for (const event of scoreboard.events) {
+  for (const event of allEvents) {
     for (const competition of event.competitions) {
       const espnGameId = competition.id;
       const status = parseGameStatus(competition.status.type.state);
