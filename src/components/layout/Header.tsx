@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -44,8 +45,15 @@ export function Header() {
         <div className="flex items-center justify-between h-16">
           <Link
             href="/"
-            className="font-display text-gold text-xs sm:text-sm tracking-wider hover:text-burnt-orange transition-colors"
+            className="font-display text-gold text-xs sm:text-sm tracking-wider hover:text-burnt-orange transition-colors flex items-center gap-2"
           >
+            <Image
+              src="/images/logo.png"
+              alt="March Madness"
+              width={28}
+              height={28}
+              className="rounded"
+            />
             MARCH MADNESS
           </Link>
 

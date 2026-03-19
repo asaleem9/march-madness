@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -313,25 +314,54 @@ export default function WagersPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {wager.status === "resolved" && (
-                    <span
-                      className={`font-display text-[0.5rem] px-2 py-1 rounded ${
-                        wager.winner_id === userId
-                          ? "bg-forest text-cream"
-                          : "bg-burnt-orange text-cream"
-                      }`}
-                    >
-                      {wager.winner_id === userId ? "WON" : "LOST"}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <Image
+                        src={wager.winner_id === userId ? "/images/wagers/won.png" : "/images/wagers/lost.png"}
+                        alt={wager.winner_id === userId ? "Won" : "Lost"}
+                        width={24}
+                        height={24}
+                      />
+                      <span
+                        className={`font-display text-[0.5rem] px-2 py-1 rounded ${
+                          wager.winner_id === userId
+                            ? "bg-forest text-cream"
+                            : "bg-burnt-orange text-cream"
+                        }`}
+                      >
+                        {wager.winner_id === userId ? "WON" : "LOST"}
+                      </span>
+                    </div>
                   )}
                   {wager.status === "declined" && (
                     <span className="font-display text-[0.5rem] text-navy/40">
                       DECLINED
                     </span>
                   )}
+                  {wager.status === "pending" && (
+                    <div className="flex items-center gap-1">
+                      <Image
+                        src="/images/wagers/pending.png"
+                        alt="Pending"
+                        width={24}
+                        height={24}
+                      />
+                      <span className="font-display text-[0.5rem] text-gold">
+                        PENDING
+                      </span>
+                    </div>
+                  )}
                   {wager.status === "accepted" && (
-                    <span className="font-display text-[0.5rem] text-forest">
-                      ACTIVE
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <Image
+                        src="/images/wagers/accepted.png"
+                        alt="Active"
+                        width={24}
+                        height={24}
+                      />
+                      <span className="font-display text-[0.5rem] text-forest">
+                        ACTIVE
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>

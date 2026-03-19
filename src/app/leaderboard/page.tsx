@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
+import Image from "next/image";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +28,12 @@ export default async function LeaderboardPage() {
     achievementsByUser.set(a.user_id, existing);
   });
 
-  const achievementLabels: Record<string, { label: string; emoji: string }> = {
-    cinderella: { label: "Cinderella Story", emoji: "👟" },
-    perfect_region: { label: "Perfect Region", emoji: "🎯" },
-    chalk_walk: { label: "Chalk Walk", emoji: "📝" },
-    bracket_genius: { label: "Bracket Genius", emoji: "🧠" },
-    fortune_teller: { label: "Fortune Teller", emoji: "🔮" },
+  const achievementLabels: Record<string, { label: string; icon: string }> = {
+    cinderella: { label: "Cinderella Story", icon: "/images/badges/cinderella.png" },
+    perfect_region: { label: "Perfect Region", icon: "/images/badges/perfect-region.png" },
+    chalk_walk: { label: "Chalk Walk", icon: "/images/badges/chalk-walk.png" },
+    bracket_genius: { label: "Bracket Genius", icon: "/images/badges/bracket-genius.png" },
+    fortune_teller: { label: "Fortune Teller", icon: "/images/badges/fortune-teller.png" },
   };
 
   return (
@@ -77,19 +78,18 @@ export default async function LeaderboardPage() {
                   }`}
                 >
                   <div className="flex items-center gap-4 min-w-[60px]">
-                    <span
-                      className={`font-display text-sm w-8 ${
-                        index === 0
-                          ? "text-gold"
-                          : index === 1
-                          ? "text-navy/60"
-                          : index === 2
-                          ? "text-burnt-orange"
-                          : "text-navy/40"
-                      }`}
-                    >
-                      {rank}
-                    </span>
+                    {rankNum <= 3 ? (
+                      <Image
+                        src={`/images/medals/${rankNum === 1 ? "gold" : rankNum === 2 ? "silver" : "bronze"}.png`}
+                        alt={`Rank ${rankNum}`}
+                        width={32}
+                        height={32}
+                      />
+                    ) : (
+                      <span className="font-display text-sm w-8 text-navy/40">
+                        {rank}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex-1 flex items-center gap-3">
@@ -114,13 +114,15 @@ export default async function LeaderboardPage() {
                       {userAchievements.length > 0 && (
                         <div className="flex gap-1 mt-0.5">
                           {userAchievements.map((a) => (
-                            <span
+                            <Image
                               key={a}
+                              src={achievementLabels[a]?.icon || ""}
+                              alt={achievementLabels[a]?.label || a}
                               title={achievementLabels[a]?.label}
-                              className="text-[0.6rem]"
-                            >
-                              {achievementLabels[a]?.emoji}
-                            </span>
+                              width={20}
+                              height={20}
+                              className="rounded-sm"
+                            />
                           ))}
                         </div>
                       )}
