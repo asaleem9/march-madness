@@ -2,17 +2,13 @@
 
 import dynamic from "next/dynamic";
 
-const DunkHero = dynamic(() => import("@/remotion/DunkHero"), {
+const HeroPlayer = dynamic(() => import("@/remotion/HeroPlayer"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[300px] bg-navy rounded-lg flex items-center justify-center">
-      <span className="font-display text-gold text-xs animate-pulse">
-        Loading...
-      </span>
-    </div>
+    <div className="w-full rounded-lg border-4 border-gold/60 bg-navy" style={{ aspectRatio: "600 / 300" }} />
   ),
 });
 
 export function HeroDynamic() {
-  return <DunkHero />;
+  return <HeroPlayer />;
 }
