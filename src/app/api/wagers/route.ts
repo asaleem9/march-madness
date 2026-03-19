@@ -142,6 +142,8 @@ export async function PATCH(request: NextRequest) {
       .from("wagers")
       .update({ status: "declined" })
       .eq("id", wager_id);
+  } else {
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
   return NextResponse.json({ success: true });

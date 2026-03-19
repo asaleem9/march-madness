@@ -14,14 +14,17 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const today = formatDateForESPN(now);
   const yesterday = formatDateForESPN(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const twoDaysAgo = formatDateForESPN(new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000));
 
-  // Fetch ESPN scoreboard for today AND yesterday (catches late-finishing games)
-  const [scoreboardToday, scoreboardYesterday] = await Promise.all([
+  // Fetch ESPN scoreboard for today, yesterday, and 2 days ago
+  // (catches late-finishing games and games with incorrect scheduled dates)
+  const [scoreboardToday, scoreboardYesterday, scoreboardTwoDaysAgo] = await Promise.all([
     fetchESPNScoreboard(today),
     fetchESPNScoreboard(yesterday),
+    fetchESPNScoreboard(twoDaysAgo),
   ]);
 
-  if (!scoreboardToday && !scoreboardYesterday) {
+  if (!scoreboardToday && !scoreboardYesterday && !scoreboardTwoDaysAgo) {
     return NextResponse.json(
       { message: "ESPN fetch failed, will retry next cycle" },
       { status: 200 }
@@ -29,6 +32,7 @@ export async function GET(request: NextRequest) {
   }
 
   const allEvents = [
+    ...(scoreboardTwoDaysAgo?.events || []),
     ...(scoreboardYesterday?.events || []),
     ...(scoreboardToday?.events || []),
   ];
@@ -115,7 +119,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Update game (idempotent)
+      // Update game (idempotent) — also sync scheduled_at from ESPN
       const { error } = await supabase
         .from("games")
         .update({
@@ -123,6 +127,7 @@ export async function GET(request: NextRequest) {
           score_a: scoreA,
           score_b: scoreB,
           winner_id: winnerId,
+          scheduled_at: competition.date,
         })
         .eq("id", game.id);
 
