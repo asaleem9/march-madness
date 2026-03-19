@@ -16,6 +16,7 @@ export default function SignupPage() {
 function SignupForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -32,6 +33,12 @@ function SignupForm() {
 
     if (password.length < 6) {
       setError("Password must be at least 6 characters");
+      setLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
       setLoading(false);
       return;
     }
@@ -157,6 +164,20 @@ function SignupForm() {
               minLength={6}
               className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
               placeholder="Min. 6 characters"
+            />
+          </div>
+          <div>
+            <label className="font-display text-[0.55rem] text-navy block mb-2">
+              CONFIRM PASSWORD
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={6}
+              className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+              placeholder="Retype your password"
             />
           </div>
           <button

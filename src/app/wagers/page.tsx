@@ -39,6 +39,7 @@ export default function WagersPage() {
   const [createError, setCreateError] = useState("");
   const [wagerDeadline, setWagerDeadline] = useState<string | null>(null);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState<string | null>(null);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -132,28 +133,33 @@ export default function WagersPage() {
   };
 
   const handleRespond = async (wagerId: string, action: "accept" | "decline" | "revoke") => {
+    setRespondingId(wagerId);
     const body: Record<string, string> = { wager_id: wagerId, action };
     if (action === "accept" && bracketId) {
       body.bracket_id = bracketId;
     }
 
-    const response = await fetch("/api/wagers", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    try {
+      const response = await fetch("/api/wagers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    if (response.ok) {
-      setWagers((prev) =>
-        prev.map((w) =>
-          w.id === wagerId
-            ? { ...w, status: action === "accept" ? "accepted" : action === "revoke" ? "declined" : "declined" }
-            : w
-        )
-      );
-    } else {
-      const data = await response.json().catch(() => null);
-      alert(data?.error || "Something went wrong. Try again.");
+      if (response.ok) {
+        setWagers((prev) =>
+          prev.map((w) =>
+            w.id === wagerId
+              ? { ...w, status: action === "accept" ? "accepted" : "declined" }
+              : w
+          )
+        );
+      } else {
+        const data = await response.json().catch(() => null);
+        setCreateError(data?.error || "Something went wrong. Try again.");
+      }
+    } finally {
+      setRespondingId(null);
     }
   };
 
@@ -334,7 +340,7 @@ export default function WagersPage() {
                   )}
                   {wager.status === "declined" && (
                     <span className="font-display text-[0.5rem] text-navy/40">
-                      DECLINED
+                      {wager.challenger_id === userId ? "REVOKED" : "DECLINED"}
                     </span>
                   )}
                   {wager.status === "pending" && (
@@ -372,15 +378,17 @@ export default function WagersPage() {
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => handleRespond(wager.id, "accept")}
-                    className="retro-btn retro-btn-secondary text-[0.45rem] py-1.5 px-4"
+                    disabled={respondingId === wager.id}
+                    className="retro-btn retro-btn-secondary text-[0.45rem] py-1.5 px-4 disabled:opacity-50"
                   >
-                    Accept
+                    {respondingId === wager.id ? "..." : "Accept"}
                   </button>
                   <button
                     onClick={() => handleRespond(wager.id, "decline")}
-                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream"
+                    disabled={respondingId === wager.id}
+                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream disabled:opacity-50"
                   >
-                    Decline
+                    {respondingId === wager.id ? "..." : "Decline"}
                   </button>
                 </div>
               )}
@@ -388,7 +396,8 @@ export default function WagersPage() {
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => setShowRevokeConfirm(wager.id)}
-                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange"
+                    disabled={respondingId === wager.id}
+                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange disabled:opacity-50"
                   >
                     Revoke
                   </button>

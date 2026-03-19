@@ -126,11 +126,11 @@ export function Header() {
               <div className="flex items-center gap-3">
                 <Link
                   href="/login"
-                  className="text-xs text-cream-dark hover:text-gold transition-colors"
+                  className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
                 >
                   Log In
                 </Link>
-                <Link href="/signup" className="retro-btn retro-btn-primary text-[0.55rem]">
+                <Link href="/signup" className="retro-btn retro-btn-primary text-[0.55rem] whitespace-nowrap">
                   Sign Up
                 </Link>
               </div>

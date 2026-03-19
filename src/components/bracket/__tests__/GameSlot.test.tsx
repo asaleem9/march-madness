@@ -103,7 +103,8 @@ describe("GameSlot", () => {
         firstFourHintA={{
           teamAName: "Texas",
           teamBName: "NC State",
-          pickTeamId: 200,
+          teamAId: 200,
+          teamBId: 201,
         }}
       />
     );

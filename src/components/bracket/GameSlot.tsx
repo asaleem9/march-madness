@@ -7,8 +7,8 @@ import { getWinProbability, formatOdds } from "@/lib/odds";
 export interface FirstFourHint {
   teamAName: string;
   teamBName: string;
-  /** team_a ID from the First Four game — used as the pick ID convention */
-  pickTeamId: number;
+  teamAId: number;
+  teamBId: number;
 }
 
 interface GameSlotProps {
@@ -37,6 +37,8 @@ function TeamRow({
   isEditable,
   onClick,
   firstFourHint,
+  onPickFF,
+  selectedTeamId,
 }: {
   team: Team | null;
   isSelected: boolean;
@@ -45,35 +47,52 @@ function TeamRow({
   isEditable: boolean;
   onClick: () => void;
   firstFourHint?: FirstFourHint;
+  onPickFF?: (teamId: number) => void;
+  selectedTeamId?: number | null;
 }) {
-  // TBD slot with First Four hint — show as a single clickable "TEX / NCST" row
+  // TBD slot with First Four hint — show both teams as individually pickable
   if (!team && firstFourHint) {
-    const rowClass = cn(
-      "game-slot-team",
-      isEditable && "cursor-pointer",
-      !isEditable && "cursor-default",
-      isSelected && "selected"
-    );
+    const aSelected = selectedTeamId === firstFourHint.teamAId;
+    const bSelected = selectedTeamId === firstFourHint.teamBId;
+    const anySelected = aSelected || bSelected;
+
     return (
       <div
-        className={rowClass}
-        onClick={() => isEditable && onClick()}
+        className={cn("game-slot-team", anySelected && "selected")}
         title={`Winner of ${firstFourHint.teamAName} vs ${firstFourHint.teamBName}`}
       >
         <div className="w-6 h-6 rounded-full bg-gold/20 shrink-0 flex items-center justify-center">
           <span className="text-[0.3rem] font-display text-navy">FF</span>
         </div>
         <span className="font-body text-xs flex-1">
-          <span className={isSelected ? "text-white" : "text-navy/70"}>
+          <span
+            className={cn(
+              isEditable && "cursor-pointer hover:underline",
+              aSelected ? "text-white font-bold" : anySelected ? "text-white/50" : "text-navy/70"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isEditable && onPickFF) onPickFF(firstFourHint.teamAId);
+            }}
+          >
             {firstFourHint.teamAName}
           </span>
-          <span className={isSelected ? "text-white/50" : "text-navy/30"}> / </span>
-          <span className={isSelected ? "text-white" : "text-navy/70"}>
+          <span className={anySelected ? "text-white/50" : "text-navy/30"}> / </span>
+          <span
+            className={cn(
+              isEditable && "cursor-pointer hover:underline",
+              bSelected ? "text-white font-bold" : anySelected ? "text-white/50" : "text-navy/70"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isEditable && onPickFF) onPickFF(firstFourHint.teamBId);
+            }}
+          >
             {firstFourHint.teamBName}
           </span>
         </span>
         <div className="flex flex-col items-end shrink-0">
-          <span className={cn("text-[0.45rem]", isSelected ? "text-white/50" : "text-navy/30")}>
+          <span className={cn("text-[0.45rem]", anySelected ? "text-white/50" : "text-navy/30")}>
             Play-In
           </span>
         </div>
@@ -187,9 +206,9 @@ export function GameSlot({
   firstFourHintA,
   firstFourHintB,
 }: GameSlotProps) {
-  // For FF hints: check if the pick matches the hint's convention ID
-  const isHintASelected = !teamA && firstFourHintA && selectedTeamId === firstFourHintA.pickTeamId;
-  const isHintBSelected = !teamB && firstFourHintB && selectedTeamId === firstFourHintB.pickTeamId;
+  // For FF hints: check if the pick matches either team in the hint
+  const isHintASelected = !teamA && firstFourHintA && (selectedTeamId === firstFourHintA.teamAId || selectedTeamId === firstFourHintA.teamBId);
+  const isHintBSelected = !teamB && firstFourHintB && (selectedTeamId === firstFourHintB.teamAId || selectedTeamId === firstFourHintB.teamBId);
 
   return (
     <div className="game-slot rounded">
@@ -201,9 +220,10 @@ export function GameSlot({
         isEditable={isEditable && (!!teamA || !!firstFourHintA)}
         onClick={() => {
           if (teamA) onPick(gameSlot, teamA.id);
-          else if (firstFourHintA) onPick(gameSlot, firstFourHintA.pickTeamId);
         }}
         firstFourHint={firstFourHintA}
+        onPickFF={(teamId) => onPick(gameSlot, teamId)}
+        selectedTeamId={selectedTeamId}
       />
       <div className="game-slot-divider" />
       <TeamRow
@@ -214,9 +234,10 @@ export function GameSlot({
         isEditable={isEditable && (!!teamB || !!firstFourHintB)}
         onClick={() => {
           if (teamB) onPick(gameSlot, teamB.id);
-          else if (firstFourHintB) onPick(gameSlot, firstFourHintB.pickTeamId);
         }}
         firstFourHint={firstFourHintB}
+        onPickFF={(teamId) => onPick(gameSlot, teamId)}
+        selectedTeamId={selectedTeamId}
       />
     </div>
   );

@@ -38,7 +38,8 @@ export function RegionBracket({
         hint: {
           teamAName: ffGame.teamA.abbreviation,
           teamBName: ffGame.teamB.abbreviation,
-          pickTeamId: ffGame.teamA.id, // convention: store team_a as the pick
+          teamAId: ffGame.teamA.id,
+          teamBId: ffGame.teamB.id,
         },
         position: ffGame.slotPosition,
       });

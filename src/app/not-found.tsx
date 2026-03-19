@@ -10,7 +10,7 @@ export default function NotFound() {
           alt="404 - eliminated"
           width={200}
           height={200}
-          className="mx-auto mb-4 rounded"
+          className="block mx-auto mb-4 rounded"
         />
         <h1 className="font-display text-navy text-lg mb-2">404</h1>
         <p className="font-display text-navy text-[0.55rem] mb-6">
