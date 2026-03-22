@@ -128,6 +128,9 @@ export default function HomePage() {
             <Link href="/leaderboard" className="retro-btn retro-btn-gold">
               Leaderboard
             </Link>
+            <Link href="/schedule" className="retro-btn retro-btn-secondary">
+              Live Scores
+            </Link>
           </div>
         </div>
       </section>

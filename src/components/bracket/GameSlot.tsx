@@ -1,6 +1,6 @@
 "use client";
 
-import type { Team } from "@/types";
+import type { Team, GameStatus } from "@/types";
 import { cn } from "@/lib/utils";
 import { getWinProbability, formatOdds } from "@/lib/odds";
 
@@ -22,6 +22,9 @@ interface GameSlotProps {
   onPick: (gameSlot: number, teamId: number) => void;
   firstFourHintA?: FirstFourHint;
   firstFourHintB?: FirstFourHint;
+  scoreA?: number | null;
+  scoreB?: number | null;
+  gameStatus?: GameStatus;
 }
 
 function truncateName(name: string, maxLen = 13): string {
@@ -39,6 +42,8 @@ function TeamRow({
   firstFourHint,
   onPickFF,
   selectedTeamId,
+  score,
+  gameStatus,
 }: {
   team: Team | null;
   isSelected: boolean;
@@ -49,6 +54,8 @@ function TeamRow({
   firstFourHint?: FirstFourHint;
   onPickFF?: (teamId: number) => void;
   selectedTeamId?: number | null;
+  score?: number | null;
+  gameStatus?: GameStatus;
 }) {
   // TBD slot with First Four hint — show both teams as individually pickable
   if (!team && firstFourHint) {
@@ -153,37 +160,54 @@ function TeamRow({
         {truncateName(team.name)}
       </span>
 
-      <div className="flex flex-col items-end shrink-0 leading-tight">
+      {score != null && gameStatus === "final" ? (
         <span
           className={cn(
-            "text-[0.55rem] font-body tabular-nums",
+            "font-body text-xs font-bold tabular-nums shrink-0 min-w-[1.5rem] text-right",
             isActiveSelection || isCorrectPick
-              ? "text-white/80"
+              ? "text-white"
               : isIncorrectPick
+                ? "text-white/70"
+                : isWinner
+                  ? "text-forest"
+                  : "text-navy/50"
+          )}
+        >
+          {score}
+        </span>
+      ) : (
+        <div className="flex flex-col items-end shrink-0 leading-tight">
+          <span
+            className={cn(
+              "text-[0.55rem] font-body tabular-nums",
+              isActiveSelection || isCorrectPick
+                ? "text-white/80"
+                : isIncorrectPick
+                  ? "text-white/50"
+                  : probability >= 10
+                    ? "text-gold font-bold"
+                    : probability >= 1
+                      ? "text-navy/60"
+                      : "text-navy/35"
+            )}
+          >
+            {probability >= 1 ? "+" : ""}
+            {oddsStr}
+          </span>
+          <span
+            className={cn(
+              "text-[0.45rem]",
+              isActiveSelection || isCorrectPick
                 ? "text-white/50"
-                : probability >= 10
-                  ? "text-gold font-bold"
-                  : probability >= 1
-                    ? "text-navy/60"
-                    : "text-navy/35"
-          )}
-        >
-          {probability >= 1 ? "+" : ""}
-          {oddsStr}
-        </span>
-        <span
-          className={cn(
-            "text-[0.45rem]",
-            isActiveSelection || isCorrectPick
-              ? "text-white/50"
-              : isIncorrectPick
-                ? "text-white/40"
-                : "text-navy/35"
-          )}
-        >
-          Seed {team.seed}
-        </span>
-      </div>
+                : isIncorrectPick
+                  ? "text-white/40"
+                  : "text-navy/35"
+            )}
+          >
+            Seed {team.seed}
+          </span>
+        </div>
+      )}
 
       {team.eliminated && (
         <span className="text-[0.5rem] text-burnt-orange shrink-0 font-bold">
@@ -205,6 +229,9 @@ export function GameSlot({
   onPick,
   firstFourHintA,
   firstFourHintB,
+  scoreA,
+  scoreB,
+  gameStatus,
 }: GameSlotProps) {
   // For FF hints: check if the pick matches either team in the hint
   const isHintASelected = !teamA && firstFourHintA && (selectedTeamId === firstFourHintA.teamAId || selectedTeamId === firstFourHintA.teamBId);
@@ -224,6 +251,8 @@ export function GameSlot({
         firstFourHint={firstFourHintA}
         onPickFF={(teamId) => onPick(gameSlot, teamId)}
         selectedTeamId={selectedTeamId}
+        score={scoreA}
+        gameStatus={gameStatus}
       />
       <div className="game-slot-divider" />
       <TeamRow
@@ -238,6 +267,8 @@ export function GameSlot({
         firstFourHint={firstFourHintB}
         onPickFF={(teamId) => onPick(gameSlot, teamId)}
         selectedTeamId={selectedTeamId}
+        score={scoreB}
+        gameStatus={gameStatus}
       />
     </div>
   );
