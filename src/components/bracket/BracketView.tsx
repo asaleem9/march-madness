@@ -70,6 +70,9 @@ export function BracketView({
                     isEditable={isEditable}
                     isCorrect={pickResults.get(game.gameSlot) ?? null}
                     onPick={onPick}
+                    scoreA={game.scoreA}
+                    scoreB={game.scoreB}
+                    gameStatus={game.status}
                   />
                 </div>
               );
@@ -99,6 +102,9 @@ export function BracketView({
                       pickResults.get(championshipGame.gameSlot) ?? null
                     }
                     onPick={onPick}
+                    scoreA={championshipGame.scoreA}
+                    scoreB={championshipGame.scoreB}
+                    gameStatus={championshipGame.status}
                   />
                 );
               })()}

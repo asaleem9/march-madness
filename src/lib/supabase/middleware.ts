@@ -39,7 +39,6 @@ export async function updateSession(request: NextRequest) {
     "/wagers",
     "/profile",
     "/admin",
-    "/schedule",
   ];
 
   const isProtected = protectedRoutes.some((route) =>

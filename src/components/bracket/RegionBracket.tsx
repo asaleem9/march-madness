@@ -105,6 +105,9 @@ export function RegionBracket({
                     onPick={onPick}
                     firstFourHintA={hintA}
                     firstFourHintB={hintB}
+                    scoreA={game.scoreA}
+                    scoreB={game.scoreB}
+                    gameStatus={game.status}
                   />
                 );
               })}

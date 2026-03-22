@@ -383,6 +383,37 @@ export function BracketBuilder({
         </div>
       )}
 
+      {/* Bracket key */}
+      <div className="mb-4">
+        <div className="font-display text-[0.45rem] text-navy/50 mb-2">BRACKET KEY</div>
+        <div className="flex flex-wrap gap-x-5 gap-y-2 text-[0.55rem] font-body px-1 py-2 border border-navy/10 rounded bg-cream/50">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-forest" />
+            <span className="text-navy/70">Your pick</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-forest" />
+            <span className="text-navy/70 flex items-center gap-0.5">Correct <span className="text-[0.45rem]">&#10003;</span></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-burnt-orange opacity-70" />
+            <span className="text-navy/70">Wrong pick</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block font-bold text-burnt-orange text-[0.5rem]">OUT</span>
+            <span className="text-navy/70">Eliminated</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block font-bold text-forest text-xs tabular-nums">72</span>
+            <span className="text-navy/70">Final score</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block text-gold font-bold text-[0.55rem]">+350</span>
+            <span className="text-navy/70">Win odds</span>
+          </div>
+        </div>
+      </div>
+
       {/* Step navigation */}
       <div className="flex gap-1 mb-6 overflow-x-auto pb-2">
         {STEPS.map((step, i) => {

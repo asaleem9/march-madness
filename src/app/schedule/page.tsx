@@ -1,15 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
-import { ROUND_DISPLAY_NAMES, REGION_DISPLAY_NAMES } from "@/lib/utils";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ScheduleClient } from "@/components/schedule/ScheduleClient";
 
 export default async function SchedulePage() {
   const supabase = await createClient();
+  const adminSupabase = createAdminClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: games } = await supabase
+  // Use admin client so unauthenticated users can also view games
+  const { data: games } = await adminSupabase
     .from("games")
     .select(
       `
@@ -50,7 +52,9 @@ export default async function SchedulePage() {
         GAME SCHEDULE
       </h1>
       <p className="text-center text-xs text-navy/50 mb-8">
-        Scores update automatically as games are played. Your bracket picks are highlighted on each matchup.
+        {user
+          ? "Scores update automatically as games are played. Your bracket picks are highlighted on each matchup."
+          : "Scores update automatically as games are played. Log in to see your bracket picks on each matchup."}
       </p>
       <ScheduleClient games={games || []} userPicks={userPicks} />
     </div>
