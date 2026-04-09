@@ -231,11 +231,11 @@ async function handleFullSync() {
     dates.push(formatDateForESPN(d));
   }
 
-  // Fetch all unmatched games (no espn_game_id or not final)
+  // Fetch games that need fixing: not final, OR final but missing winner/scores
   const { data: unmatchedGames } = await adminClient
     .from("games")
     .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
-    .neq("status", "final")
+    .or("status.neq.final,winner_id.is.null,score_a.is.null,score_b.is.null")
     .order("game_slot", { ascending: true });
 
   if (!unmatchedGames || unmatchedGames.length === 0) {
