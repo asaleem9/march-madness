@@ -13,7 +13,15 @@ async function isAdmin() {
   return user && adminEmails.includes(user.email || "");
 }
 
+export async function GET(request: NextRequest) {
+  return handleBackfill();
+}
+
 export async function POST(request: NextRequest) {
+  return handleBackfill();
+}
+
+async function handleBackfill() {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
