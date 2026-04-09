@@ -133,8 +133,11 @@ export async function GET(request: NextRequest) {
 
       if (!error) gamesUpdated++;
 
-      // If game just went final, process results
-      if (status === "final" && winnerId && game.status !== "final") {
+      // If game is final with a winner, process results
+      // Always advance winner and fix eliminations (idempotent).
+      // Only score picks and notify on the first transition to final.
+      const isNewlyFinal = game.status !== "final";
+      if (status === "final" && winnerId) {
         // Mark losing team as eliminated
         const loserId =
           winnerId === game.team_a_id ? game.team_b_id : game.team_a_id;
@@ -168,94 +171,97 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Update bracket picks for this game
-        const { data: picks } = await supabase
-          .from("bracket_picks")
-          .select("*, brackets!inner(user_id)")
-          .eq("game_slot", game.game_slot);
+        // Score picks and notify only on the first transition to final
+        if (isNewlyFinal) {
+          // Update bracket picks for this game
+          const { data: picks } = await supabase
+            .from("bracket_picks")
+            .select("*, brackets!inner(user_id)")
+            .eq("game_slot", game.game_slot);
 
-        if (picks) {
-          for (const pick of picks) {
-            const correct = pick.picked_team_id === winnerId;
-            let points = 0;
+          if (picks) {
+            for (const pick of picks) {
+              const correct = pick.picked_team_id === winnerId;
+              let points = 0;
 
-            if (correct) {
-              const basePoints = getRoundPoints(game.round);
-              // Check if upset
-              const winnerTeam =
-                winnerId === game.team_a_id ? game.team_a : game.team_b;
-              const loserTeam =
-                winnerId === game.team_a_id ? game.team_b : game.team_a;
+              if (correct) {
+                const basePoints = getRoundPoints(game.round);
+                // Check if upset
+                const winnerTeam =
+                  winnerId === game.team_a_id ? game.team_a : game.team_b;
+                const loserTeam =
+                  winnerId === game.team_a_id ? game.team_b : game.team_a;
 
-              if (
-                winnerTeam &&
-                loserTeam &&
-                isUpset(winnerTeam.seed, loserTeam.seed)
-              ) {
-                points = Math.round(basePoints * 1.5);
-              } else {
-                points = basePoints;
+                if (
+                  winnerTeam &&
+                  loserTeam &&
+                  isUpset(winnerTeam.seed, loserTeam.seed)
+                ) {
+                  points = Math.round(basePoints * 1.5);
+                } else {
+                  points = basePoints;
+                }
               }
+
+              await supabase
+                .from("bracket_picks")
+                .update({ is_correct: correct, points_earned: points })
+                .eq("id", pick.id);
+            }
+          }
+
+          // Recalculate bracket scores
+          const { data: allPicks } = await supabase
+            .from("bracket_picks")
+            .select("bracket_id, points_earned")
+            .not("is_correct", "is", null);
+
+          if (allPicks) {
+            const scoresByBracket = new Map<string, number>();
+            for (const pick of allPicks) {
+              const current = scoresByBracket.get(pick.bracket_id) || 0;
+              scoresByBracket.set(
+                pick.bracket_id,
+                current + (pick.points_earned || 0)
+              );
             }
 
-            await supabase
-              .from("bracket_picks")
-              .update({ is_correct: correct, points_earned: points })
-              .eq("id", pick.id);
-          }
-        }
-
-        // Recalculate bracket scores
-        const { data: allPicks } = await supabase
-          .from("bracket_picks")
-          .select("bracket_id, points_earned")
-          .not("is_correct", "is", null);
-
-        if (allPicks) {
-          const scoresByBracket = new Map<string, number>();
-          for (const pick of allPicks) {
-            const current = scoresByBracket.get(pick.bracket_id) || 0;
-            scoresByBracket.set(
-              pick.bracket_id,
-              current + (pick.points_earned || 0)
-            );
+            for (const [bracketId, score] of scoresByBracket) {
+              await supabase
+                .from("brackets")
+                .update({ score })
+                .eq("id", bracketId);
+              scoresRecalculated++;
+            }
           }
 
-          for (const [bracketId, score] of scoresByBracket) {
-            await supabase
-              .from("brackets")
-              .update({ score })
-              .eq("id", bracketId);
-            scoresRecalculated++;
+          // Queue notifications for affected users
+          if (picks) {
+            const userIds = [
+              ...new Set(
+                picks.map(
+                  (p) => (p.brackets as unknown as { user_id: string }).user_id
+                )
+              ),
+            ];
+            const notifications = userIds.map((uid) => ({
+              user_id: uid,
+              type: "game_result" as const,
+              payload: {
+                game_id: game.id,
+                team_a: game.team_a?.name,
+                team_b: game.team_b?.name,
+                winner:
+                  winnerId === game.team_a_id
+                    ? game.team_a?.name
+                    : game.team_b?.name,
+                score: `${scoreA}-${scoreB}`,
+              },
+              batch_key: `${today}-${new Date().getHours() < 18 ? "afternoon" : "evening"}`,
+            }));
+
+            await supabase.from("notification_queue").insert(notifications);
           }
-        }
-
-        // Queue notifications for affected users
-        if (picks) {
-          const userIds = [
-            ...new Set(
-              picks.map(
-                (p) => (p.brackets as unknown as { user_id: string }).user_id
-              )
-            ),
-          ];
-          const notifications = userIds.map((uid) => ({
-            user_id: uid,
-            type: "game_result" as const,
-            payload: {
-              game_id: game.id,
-              team_a: game.team_a?.name,
-              team_b: game.team_b?.name,
-              winner:
-                winnerId === game.team_a_id
-                  ? game.team_a?.name
-                  : game.team_b?.name,
-              score: `${scoreA}-${scoreB}`,
-            },
-            batch_key: `${today}-${new Date().getHours() < 18 ? "afternoon" : "evening"}`,
-          }));
-
-          await supabase.from("notification_queue").insert(notifications);
         }
       }
     }
