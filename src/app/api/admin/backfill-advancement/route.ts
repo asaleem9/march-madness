@@ -135,12 +135,11 @@ async function handleBackfill() {
       }
     }
 
-    // Fix bracket pick scoring
+    // Fix bracket pick scoring — rescore ALL picks (not just unscored) to fix wrong point values
     const { data: picks } = await adminClient
       .from("bracket_picks")
       .select("*")
-      .eq("game_slot", game.game_slot)
-      .is("is_correct", null);
+      .eq("game_slot", game.game_slot);
 
     if (picks && picks.length > 0) {
       for (const pick of picks) {
@@ -156,11 +155,13 @@ async function handleBackfill() {
             points = basePoints;
           }
         }
-        await adminClient
-          .from("bracket_picks")
-          .update({ is_correct: correct, points_earned: points })
-          .eq("id", pick.id);
-        picksScored++;
+        if (pick.is_correct !== correct || pick.points_earned !== points) {
+          await adminClient
+            .from("bracket_picks")
+            .update({ is_correct: correct, points_earned: points })
+            .eq("id", pick.id);
+          picksScored++;
+        }
       }
     }
   }
