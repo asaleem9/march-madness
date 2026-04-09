@@ -573,8 +573,8 @@ async function handleVerify() {
 
       if (correct) {
         const basePoints = getRoundPoints(game.round);
-        const winnerTeam = game.winner_id === game.team_a_id ? game.team_a : game.team_b;
-        const loserTeam = game.winner_id === game.team_a_id ? game.team_b : game.team_a;
+        const winnerTeam = (game.winner_id === game.team_a_id ? game.team_a : game.team_b) as unknown as { name: string; seed: number } | null;
+        const loserTeam = (game.winner_id === game.team_a_id ? game.team_b : game.team_a) as unknown as { name: string; seed: number } | null;
         if (winnerTeam && loserTeam && isUpset(winnerTeam.seed, loserTeam.seed)) {
           expectedPoints = Math.round(basePoints * 1.5);
         } else {
