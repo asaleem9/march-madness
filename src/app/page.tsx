@@ -1,10 +1,12 @@
 import Link from "next/link";
 import FeatureIcon from "@/components/FeatureIcon";
 import SectionDivider from "@/components/SectionDivider";
+import { ChampionModal } from "@/components/ChampionModal";
 
 export default function HomePage() {
   return (
     <div className="min-h-[calc(100vh-8rem)]">
+      <ChampionModal />
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-navy py-12 sm:py-20">
         <div className="absolute inset-0 crt-effect" />
