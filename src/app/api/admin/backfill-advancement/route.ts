@@ -14,6 +14,10 @@ async function isAdmin() {
 }
 
 export async function GET(request: NextRequest) {
+  const url = new URL(request.url);
+  if (url.searchParams.get("diagnose") === "true") {
+    return handleDiagnose();
+  }
   return handleBackfill();
 }
 
@@ -172,5 +176,41 @@ async function handleBackfill() {
     picksScored,
     bracketsRecalculated,
     details,
+  });
+}
+
+async function handleDiagnose() {
+  if (!(await isAdmin())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const adminClient = createAdminClient();
+
+  // Find games that are NOT final
+  const { data: incompleteGames } = await adminClient
+    .from("games")
+    .select("game_slot, round, region, status, team_a_id, team_b_id, winner_id, espn_game_id, team_a:teams!team_a_id(name, seed), team_b:teams!team_b_id(name, seed)")
+    .neq("status", "final")
+    .order("game_slot", { ascending: true });
+
+  // Find games with null teams (TBD)
+  const { data: tbdGamesA } = await adminClient
+    .from("games")
+    .select("game_slot, round, region, status, team_a_id, team_b_id")
+    .is("team_a_id", null)
+    .order("game_slot", { ascending: true });
+
+  const { data: tbdGamesB } = await adminClient
+    .from("games")
+    .select("game_slot, round, region, status, team_a_id, team_b_id")
+    .is("team_b_id", null)
+    .order("game_slot", { ascending: true });
+
+  return NextResponse.json({
+    incompleteGames,
+    tbdSlots: {
+      missingTeamA: tbdGamesA,
+      missingTeamB: tbdGamesB,
+    },
   });
 }
