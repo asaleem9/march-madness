@@ -14,7 +14,19 @@ async function isAdmin() {
   return user && adminEmails.includes(user.email || "");
 }
 
+async function authorize(request: NextRequest): Promise<boolean> {
+  // Accept either admin session cookie or CRON_SECRET bearer token
+  const authHeader = request.headers.get("authorization");
+  if (authHeader === `Bearer ${process.env.CRON_SECRET}`) {
+    return true;
+  }
+  return !!(await isAdmin());
+}
+
 export async function GET(request: NextRequest) {
+  if (!(await authorize(request))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const url = new URL(request.url);
   if (url.searchParams.get("diagnose") === "true") {
     return handleDiagnose();
@@ -26,13 +38,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await authorize(request))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   return handleBackfill();
 }
 
 async function handleBackfill() {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const adminClient = createAdminClient();
 
@@ -184,9 +196,6 @@ async function handleBackfill() {
 }
 
 async function handleFullSync() {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const adminClient = createAdminClient();
   const details: string[] = [];
@@ -477,9 +486,6 @@ async function handleFullSync() {
 }
 
 async function handleDiagnose() {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const adminClient = createAdminClient();
 
