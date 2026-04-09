@@ -521,13 +521,12 @@ async function handleVerify() {
   const gameMap = new Map(games.map((g) => [g.game_slot, g]));
 
   // Get all brackets with user display names
-  const { data: brackets } = await adminClient
+  const { data: brackets, error: bracketsError } = await adminClient
     .from("brackets")
-    .select("id, name, score, user_id")
-    .eq("is_finalized", true);
+    .select("id, name, score, user_id, locked");
 
-  if (!brackets) {
-    return NextResponse.json({ error: "Failed to fetch brackets" }, { status: 500 });
+  if (bracketsError || !brackets) {
+    return NextResponse.json({ error: "Failed to fetch brackets", detail: bracketsError?.message }, { status: 500 });
   }
 
   // Fetch profiles for display names
