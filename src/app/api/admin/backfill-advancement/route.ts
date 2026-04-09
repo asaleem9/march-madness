@@ -230,65 +230,136 @@ async function handleFullSync() {
 
   details.push(`Found ${allEvents.length} total ESPN games across tournament`);
 
-  // For each unmatched game, try to find its ESPN match
-  for (const game of unmatchedGames) {
-    // Skip games where both teams are null (can't match)
-    if (!game.team_a && !game.team_b) continue;
+  // Build set of ESPN game IDs already claimed by final games
+  const { data: claimedGames } = await adminClient
+    .from("games")
+    .select("espn_game_id")
+    .eq("status", "final")
+    .not("espn_game_id", "is", null);
+  const claimedIds = new Set((claimedGames || []).map((g) => g.espn_game_id));
 
-    for (const { competition } of allEvents) {
-      const competitors = competition.competitors;
-      const espnTeamIds = competitors.map((c: any) => c.team.id);
+  // Multiple passes: match games with both teams first, then single-team matches
+  // Process in game_slot order so earlier rounds resolve before later ones
+  // Run up to 6 passes to resolve cascading dependencies
+  for (let pass = 0; pass < 6; pass++) {
+    // Re-fetch unmatched games each pass (teams may have been filled by previous pass)
+    const { data: currentUnmatched } = await adminClient
+      .from("games")
+      .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
+      .neq("status", "final")
+      .order("game_slot", { ascending: true });
 
-      // Match by ESPN team IDs
-      const teamAMatch = game.team_a && espnTeamIds.includes(game.team_a.espn_id);
-      const teamBMatch = game.team_b && espnTeamIds.includes(game.team_b.espn_id);
+    if (!currentUnmatched || currentUnmatched.length === 0) break;
 
-      if (teamAMatch && teamBMatch) {
-        const status = parseGameStatus(competition.status.type.state);
+    let matchedThisPass = 0;
 
-        // Get scores
-        let scoreA: number | null = null;
-        let scoreB: number | null = null;
-        for (const c of competitors) {
-          if (game.team_a?.espn_id === c.team.id && c.score) {
-            scoreA = parseInt(c.score);
-          } else if (game.team_b?.espn_id === c.team.id && c.score) {
-            scoreB = parseInt(c.score);
-          }
-        }
+    for (const game of currentUnmatched) {
+      if (!game.team_a && !game.team_b) continue;
 
-        let winnerId: number | null = null;
-        if (status === "final") {
-          const winnerComp = competitors.find((c: any) => c.winner);
-          if (winnerComp) {
-            if (game.team_a?.espn_id === winnerComp.team.id) {
-              winnerId = game.team_a_id;
-            } else if (game.team_b?.espn_id === winnerComp.team.id) {
-              winnerId = game.team_b_id;
+      // Debug: log what we're looking for on first pass
+      if (pass === 0) {
+        details.push(
+          `Slot ${game.game_slot}: looking for ${game.team_a?.name || "TBD"} (espn:${game.team_a?.espn_id || "null"}) vs ${game.team_b?.name || "TBD"} (espn:${game.team_b?.espn_id || "null"})`
+        );
+
+        // For games with both teams, show unclaimed ESPN events that have a partial match
+        if (game.team_a && game.team_b) {
+          for (const { event, competition } of allEvents) {
+            if (claimedIds.has(competition.id)) continue;
+            const cIds = competition.competitors.map((c: any) => c.team.id);
+            const cNames = competition.competitors.map((c: any) => c.team.displayName);
+            const aHit = cIds.includes(game.team_a.espn_id);
+            const bHit = cIds.includes(game.team_b.espn_id);
+            if (aHit || bHit) {
+              details.push(
+                `  ESPN partial: ${cNames.join(" vs ")} (ids: ${cIds.join(",")}) aHit=${aHit} bHit=${bHit} event="${event.shortName}"`
+              );
             }
           }
         }
+      }
 
-        await adminClient
-          .from("games")
-          .update({
-            espn_game_id: competition.id,
-            status,
-            score_a: scoreA,
-            score_b: scoreB,
-            winner_id: winnerId,
-            scheduled_at: competition.date,
-          })
-          .eq("id", game.id);
+      for (const { competition } of allEvents) {
+        if (claimedIds.has(competition.id)) continue;
 
-        const winnerName = winnerId === game.team_a_id ? game.team_a?.name : game.team_b?.name;
-        details.push(
-          `Matched slot ${game.game_slot}: ${game.team_a?.name || "TBD"} vs ${game.team_b?.name || "TBD"} → ${status}${winnerId ? ` (winner: ${winnerName}, ${scoreA}-${scoreB})` : ""}`
-        );
-        gamesMatched++;
-        break;
+        const competitors = competition.competitors;
+        const espnTeamIds = competitors.map((c: any) => c.team.id);
+
+        const teamAMatch = game.team_a && espnTeamIds.includes(game.team_a.espn_id);
+        const teamBMatch = game.team_b && espnTeamIds.includes(game.team_b.espn_id);
+
+        // Need at least one team to match, and the other to either match or be null
+        const hasMatch =
+          (teamAMatch && teamBMatch) ||
+          (teamAMatch && !game.team_b) ||
+          (teamBMatch && !game.team_a);
+
+        if (hasMatch) {
+          const status = parseGameStatus(competition.status.type.state);
+
+          // Get scores
+          let scoreA: number | null = null;
+          let scoreB: number | null = null;
+          for (const c of competitors) {
+            if (game.team_a?.espn_id === c.team.id && c.score) {
+              scoreA = parseInt(c.score);
+            } else if (game.team_b?.espn_id === c.team.id && c.score) {
+              scoreB = parseInt(c.score);
+            }
+          }
+
+          let winnerId: number | null = null;
+          if (status === "final") {
+            const winnerComp = competitors.find((c: any) => c.winner);
+            if (winnerComp) {
+              if (game.team_a?.espn_id === winnerComp.team.id) {
+                winnerId = game.team_a_id;
+              } else if (game.team_b?.espn_id === winnerComp.team.id) {
+                winnerId = game.team_b_id;
+              }
+            }
+          }
+
+          await adminClient
+            .from("games")
+            .update({
+              espn_game_id: competition.id,
+              status,
+              score_a: scoreA,
+              score_b: scoreB,
+              winner_id: winnerId,
+              scheduled_at: competition.date,
+            })
+            .eq("id", game.id);
+
+          claimedIds.add(competition.id);
+
+          // If final, advance winner to next slot immediately
+          if (status === "final" && winnerId && game.next_game_slot) {
+            const loserId = winnerId === game.team_a_id ? game.team_b_id : game.team_a_id;
+            if (loserId) {
+              await adminClient.from("teams").update({ eliminated: true }).eq("id", loserId);
+            }
+            const updateField = game.slot_position === "top" ? "team_a_id" : "team_b_id";
+            await adminClient
+              .from("games")
+              .update({ [updateField]: winnerId })
+              .eq("game_slot", game.next_game_slot);
+          }
+
+          const winnerName = winnerId === game.team_a_id ? game.team_a?.name : game.team_b?.name;
+          details.push(
+            `[pass ${pass + 1}] Matched slot ${game.game_slot}: ${game.team_a?.name || "TBD"} vs ${game.team_b?.name || "TBD"} → ${status}${winnerId ? ` (winner: ${winnerName}, ${scoreA}-${scoreB})` : ""}`
+          );
+          gamesMatched++;
+          matchedThisPass++;
+          break;
+        }
       }
     }
+
+    details.push(`Pass ${pass + 1}: matched ${matchedThisPass} games`);
+    if (matchedThisPass === 0) break;
   }
 
   // Now run the standard backfill to advance winners from newly-final games
