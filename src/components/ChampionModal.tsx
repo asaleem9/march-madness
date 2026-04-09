@@ -89,9 +89,9 @@ export function ChampionModal() {
           <div className="absolute bottom-4 right-6 text-gold/50 animate-pulse text-base" style={{ animationDelay: "0.3s" }}>&#10022;</div>
 
           <div className="relative z-10">
-            {/* Team logo */}
-            <div className="flex justify-center mb-4">
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 champ-logo-glow">
+            {/* Matchup: Michigan vs UConn logos */}
+            <div className="flex items-center justify-center gap-4 sm:gap-6 mb-5">
+              <div className="relative w-20 h-20 sm:w-24 sm:h-24 champ-logo-glow">
                 <Image
                   src="https://a.espncdn.com/i/teamlogos/ncaa/500/130.png"
                   alt="Michigan Wolverines"
@@ -100,12 +100,26 @@ export function ChampionModal() {
                   unoptimized
                 />
               </div>
+              <div className="flex flex-col items-center">
+                <span className="font-display text-cream text-sm sm:text-base">69</span>
+                <span className="font-body text-cream/30 text-[0.5rem] my-0.5">vs</span>
+                <span className="font-display text-cream/50 text-sm sm:text-base">63</span>
+              </div>
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 opacity-50">
+                <Image
+                  src="https://a.espncdn.com/i/teamlogos/ncaa/500/41.png"
+                  alt="UConn Huskies"
+                  fill
+                  className="object-contain"
+                  unoptimized
+                />
+              </div>
             </div>
 
-            {/* Trophy row */}
-            <div className="flex items-center justify-center gap-3 mb-3">
+            {/* Champion name - big */}
+            <div className="flex items-center justify-center gap-3 mb-2">
               <span className="text-2xl champ-trophy-bounce">🏆</span>
-              <h2 className="font-display text-gold text-base sm:text-lg leading-relaxed champ-title-glow">
+              <h2 className="font-display text-gold text-xl sm:text-2xl md:text-3xl leading-relaxed champ-title-glow">
                 MICHIGAN
               </h2>
               <span className="text-2xl champ-trophy-bounce" style={{ animationDelay: "0.15s" }}>🏆</span>
@@ -114,35 +128,6 @@ export function ChampionModal() {
             <p className="font-display text-burnt-orange text-[0.6rem] sm:text-[0.7rem] tracking-wider">
               2026 NCAA CHAMPIONS
             </p>
-
-            {/* Score line */}
-            <div className="flex items-center justify-center gap-3 mt-3">
-              <div className="flex items-center gap-2">
-                <div className="relative w-5 h-5">
-                  <Image
-                    src="https://a.espncdn.com/i/teamlogos/ncaa/500/130.png"
-                    alt="Michigan"
-                    fill
-                    className="object-contain"
-                    unoptimized
-                  />
-                </div>
-                <span className="font-display text-cream text-[0.6rem]">69</span>
-              </div>
-              <span className="font-body text-cream/40 text-xs">-</span>
-              <div className="flex items-center gap-2">
-                <span className="font-display text-cream/60 text-[0.6rem]">63</span>
-                <div className="relative w-5 h-5">
-                  <Image
-                    src="https://a.espncdn.com/i/teamlogos/ncaa/500/41.png"
-                    alt="UConn"
-                    fill
-                    className="object-contain opacity-60"
-                    unoptimized
-                  />
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
