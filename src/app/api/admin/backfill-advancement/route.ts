@@ -260,11 +260,65 @@ async function handleFullSync() {
 
   details.push(`Found ${allEvents.length} total ESPN games across tournament`);
 
-  // Build set of ESPN game IDs already claimed by final games
+  // Build ESPN event lookup by competition ID
+  const espnById = new Map<string, any>();
+  for (const { competition } of allEvents) {
+    espnById.set(competition.id, competition);
+  }
+
+  // First: fix games that already have espn_game_id but are missing winner/scores
+  const gamesWithEspnId = unmatchedGames.filter((g) => g.espn_game_id);
+  for (const game of gamesWithEspnId) {
+    const competition = espnById.get(game.espn_game_id);
+    if (!competition) {
+      details.push(`Slot ${game.game_slot}: ESPN game ${game.espn_game_id} not found in scanned data`);
+      continue;
+    }
+
+    const status = parseGameStatus(competition.status.type.state);
+    const competitors = competition.competitors;
+
+    let scoreA: number | null = null;
+    let scoreB: number | null = null;
+    for (const c of competitors) {
+      if (game.team_a?.espn_id === c.team.id && c.score) scoreA = parseInt(c.score);
+      else if (game.team_b?.espn_id === c.team.id && c.score) scoreB = parseInt(c.score);
+    }
+
+    let winnerId: number | null = null;
+    if (status === "final") {
+      const winnerComp = competitors.find((c: any) => c.winner);
+      if (winnerComp) {
+        if (game.team_a?.espn_id === winnerComp.team.id) winnerId = game.team_a_id;
+        else if (game.team_b?.espn_id === winnerComp.team.id) winnerId = game.team_b_id;
+      }
+    }
+
+    const updates: Record<string, any> = { status };
+    if (scoreA != null) updates.score_a = scoreA;
+    if (scoreB != null) updates.score_b = scoreB;
+    if (winnerId) updates.winner_id = winnerId;
+
+    await adminClient.from("games").update(updates).eq("id", game.id);
+
+    if (winnerId && game.next_game_slot) {
+      const loserId = winnerId === game.team_a_id ? game.team_b_id : game.team_a_id;
+      if (loserId) await adminClient.from("teams").update({ eliminated: true }).eq("id", loserId);
+      const updateField = game.slot_position === "top" ? "team_a_id" : "team_b_id";
+      await adminClient.from("games").update({ [updateField]: winnerId }).eq("game_slot", game.next_game_slot);
+    }
+
+    const winnerName = winnerId === game.team_a_id ? game.team_a?.name : game.team_b?.name;
+    details.push(
+      `Re-synced slot ${game.game_slot}: ${game.team_a?.name || "?"} vs ${game.team_b?.name || "?"} → ${status}${winnerId ? ` (winner: ${winnerName}, ${scoreA}-${scoreB})` : " (no winner found)"}`
+    );
+    if (winnerId) gamesMatched++;
+  }
+
+  // Build set of ESPN game IDs already claimed
   const { data: claimedGames } = await adminClient
     .from("games")
     .select("espn_game_id")
-    .eq("status", "final")
     .not("espn_game_id", "is", null);
   const claimedIds = new Set((claimedGames || []).map((g) => g.espn_game_id));
 
