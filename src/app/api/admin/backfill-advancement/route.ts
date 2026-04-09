@@ -520,15 +520,23 @@ async function handleVerify() {
   // Build a map of game_slot -> game info for quick lookup
   const gameMap = new Map(games.map((g) => [g.game_slot, g]));
 
-  // Get all brackets
+  // Get all brackets with user display names
   const { data: brackets } = await adminClient
     .from("brackets")
-    .select("id, name, score, user_id, profiles!inner(display_name)")
+    .select("id, name, score, user_id")
     .eq("is_finalized", true);
 
   if (!brackets) {
     return NextResponse.json({ error: "Failed to fetch brackets" }, { status: 500 });
   }
+
+  // Fetch profiles for display names
+  const userIds = [...new Set(brackets.map((b) => b.user_id))];
+  const { data: profiles } = await adminClient
+    .from("profiles")
+    .select("id, display_name")
+    .in("id", userIds);
+  const profileMap = new Map((profiles || []).map((p) => [p.id, p.display_name]));
 
   // Get all picks
   const { data: allPicks } = await adminClient
@@ -603,14 +611,13 @@ async function handleVerify() {
       }
     }
 
-    const profile = bracket.profiles as unknown as { display_name: string };
     const storedScore = bracket.score ?? 0;
     const scoreMismatch = storedScore !== expectedScore;
 
     bracketResults.push({
       bracketId: bracket.id,
       name: bracket.name,
-      user: profile.display_name,
+      user: profileMap.get(bracket.user_id) || bracket.user_id,
       storedScore,
       expectedScore,
       scoreMismatch,
