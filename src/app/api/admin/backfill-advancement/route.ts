@@ -37,6 +37,9 @@ export async function GET(request: NextRequest) {
   if (url.searchParams.get("verify") === "true") {
     return handleVerify();
   }
+  if (url.searchParams.get("compare")) {
+    return handleCompare(url.searchParams.get("compare")!);
+  }
   return handleBackfill();
 }
 
@@ -640,6 +643,122 @@ async function handleVerify() {
     totalGamesScored: games.length,
     brackets: bracketResults,
   });
+}
+
+async function handleCompare(bracketIds: string) {
+  const adminClient = createAdminClient();
+  const ids = bracketIds.split(",");
+
+  // Get all games
+  const { data: games } = await adminClient
+    .from("games")
+    .select("game_slot, round, region, winner_id, score_a, score_b, team_a_id, team_b_id, team_a:teams!team_a_id(name, seed), team_b:teams!team_b_id(name, seed)")
+    .eq("status", "final")
+    .not("winner_id", "is", null)
+    .order("game_slot", { ascending: true });
+
+  if (!games) return NextResponse.json({ error: "Failed to fetch games" }, { status: 500 });
+
+  // Get brackets
+  const { data: brackets } = await adminClient
+    .from("brackets")
+    .select("id, name, score, user_id")
+    .in("id", ids);
+
+  if (!brackets) return NextResponse.json({ error: "Failed to fetch brackets" }, { status: 500 });
+
+  const userIds = brackets.map((b) => b.user_id);
+  const { data: profiles } = await adminClient
+    .from("profiles")
+    .select("id, display_name")
+    .in("id", userIds);
+  const profileMap = new Map((profiles || []).map((p) => [p.id, p.display_name]));
+
+  // Get all picks for these brackets
+  const { data: allPicks } = await adminClient
+    .from("bracket_picks")
+    .select("bracket_id, game_slot, picked_team_id, is_correct, points_earned")
+    .in("bracket_id", ids);
+
+  if (!allPicks) return NextResponse.json({ error: "Failed to fetch picks" }, { status: 500 });
+
+  // Group picks: bracketId -> gameSlot -> pick
+  const pickMap = new Map<string, Map<number, typeof allPicks[0]>>();
+  for (const pick of allPicks) {
+    if (!pickMap.has(pick.bracket_id)) pickMap.set(pick.bracket_id, new Map());
+    pickMap.get(pick.bracket_id)!.set(pick.game_slot, pick);
+  }
+
+  // Build team name lookup from games
+  const teamNames = new Map<number, string>();
+  for (const g of games) {
+    const ta = g.team_a as unknown as { name: string; seed: number } | null;
+    const tb = g.team_b as unknown as { name: string; seed: number } | null;
+    if (ta && g.team_a_id) teamNames.set(g.team_a_id, `(${ta.seed}) ${ta.name}`);
+    if (tb && g.team_b_id) teamNames.set(g.team_b_id, `(${tb.seed}) ${tb.name}`);
+  }
+
+  // Build comparison per game
+  const comparison = games.map((game) => {
+    const ta = game.team_a as unknown as { name: string; seed: number } | null;
+    const tb = game.team_b as unknown as { name: string; seed: number } | null;
+    const winnerName = teamNames.get(game.winner_id) || String(game.winner_id);
+
+    const bracketPicks = brackets.map((b) => {
+      const pick = pickMap.get(b.id)?.get(game.game_slot);
+      if (!pick) return { user: profileMap.get(b.user_id) || b.name, picked: null, correct: null, points: 0 };
+      return {
+        user: profileMap.get(b.user_id) || b.name,
+        picked: teamNames.get(pick.picked_team_id) || String(pick.picked_team_id),
+        correct: pick.is_correct,
+        points: pick.points_earned ?? 0,
+      };
+    });
+
+    return {
+      game_slot: game.game_slot,
+      round: game.round,
+      region: game.region,
+      matchup: `${ta?.name || "?"} vs ${tb?.name || "?"}`,
+      score: `${game.score_a}-${game.score_b}`,
+      winner: winnerName,
+      picks: bracketPicks,
+    };
+  });
+
+  // Summary per bracket
+  const summaries = brackets.map((b) => {
+    const picks = pickMap.get(b.id);
+    let totalPoints = 0;
+    let correctCount = 0;
+    const byRound: Record<string, { correct: number; total: number; points: number }> = {};
+
+    for (const game of games) {
+      const pick = picks?.get(game.game_slot);
+      if (!byRound[game.round]) byRound[game.round] = { correct: 0, total: 0, points: 0 };
+      byRound[game.round].total++;
+      if (pick) {
+        const pts = pick.points_earned ?? 0;
+        totalPoints += pts;
+        if (pick.is_correct) {
+          correctCount++;
+          byRound[game.round].correct++;
+          byRound[game.round].points += pts;
+        }
+      }
+    }
+
+    return {
+      user: profileMap.get(b.user_id) || b.name,
+      bracketName: b.name,
+      totalPoints,
+      storedScore: b.score,
+      correctCount,
+      byRound,
+    };
+  });
+
+  return NextResponse.json({ summaries, games: comparison });
 }
 
 async function handleDiagnose() {
