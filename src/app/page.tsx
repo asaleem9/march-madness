@@ -215,10 +215,13 @@ export default function HomePage() {
               </div>
             ))}
           </div>
-          <div className="flex justify-center mt-6">
+          <div className="flex flex-col items-center mt-6 gap-3">
             <span className="inline-block font-display text-[0.5rem] bg-burnt-orange text-cream px-4 py-2 border-2 border-burnt-orange/60 shadow-[3px_3px_0_rgba(0,0,0,0.3)]">
               UPSET PICKS EARN 1.5× BONUS
             </span>
+            <Link href="/scoring" className="font-body text-xs text-gold/70 hover:text-gold transition-colors underline underline-offset-2">
+              Full scoring details
+            </Link>
           </div>
         </div>
       </section>
