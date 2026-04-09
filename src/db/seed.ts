@@ -42,7 +42,7 @@ const teams = [
   { name: "NC State", abbreviation: "NCST", seed: 11, region: "west", record: "First Four", espn_id: "152" },
   { name: "Texas", abbreviation: "TEX", seed: 11, region: "west", record: "First Four", espn_id: "251" },
   { name: "Gonzaga", abbreviation: "GONZ", seed: 3, region: "west", record: "30-3", espn_id: "2250" },
-  { name: "Kennesaw St.", abbreviation: "KSU", seed: 14, region: "west", record: "21-13", espn_id: "2306" },
+  { name: "Kennesaw St.", abbreviation: "KSU", seed: 14, region: "west", record: "21-13", espn_id: "338" },
   { name: "Miami FL", abbreviation: "MIA", seed: 7, region: "west", record: "25-8", espn_id: "2390" },
   { name: "Missouri", abbreviation: "MIZ", seed: 10, region: "west", record: "20-12", espn_id: "142" },
   { name: "Purdue", abbreviation: "PUR", seed: 2, region: "west", record: "27-8", espn_id: "2509" },

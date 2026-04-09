@@ -202,6 +202,20 @@ async function handleFullSync() {
   let gamesMatched = 0;
   let gamesUpdated = 0;
 
+  // Fix known ESPN ID mismatches
+  const espnIdFixes: Record<string, string> = {
+    "2306": "338", // Kennesaw St.
+  };
+  for (const [oldId, newId] of Object.entries(espnIdFixes)) {
+    const { count } = await adminClient
+      .from("teams")
+      .update({ espn_id: newId })
+      .eq("espn_id", oldId);
+    if (count && count > 0) {
+      details.push(`Fixed ESPN ID: ${oldId} → ${newId}`);
+    }
+  }
+
   // Scan every day of the tournament (March 17 – April 7, 2026)
   const startDate = new Date("2026-03-17");
   const endDate = new Date("2026-04-08");
