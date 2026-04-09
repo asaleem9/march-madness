@@ -14,6 +14,7 @@ const navLinks = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/schedule", label: "Schedule" },
   { href: "/wagers", label: "Wagers" },
+  { href: "/scoring", label: "Scoring" },
 ];
 
 export function Header() {
@@ -124,6 +125,12 @@ export function Header() {
               </>
             ) : (
               <div className="flex items-center gap-3">
+                <Link
+                  href="/scoring"
+                  className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
+                >
+                  Scoring
+                </Link>
                 <Link
                   href="/login"
                   className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
