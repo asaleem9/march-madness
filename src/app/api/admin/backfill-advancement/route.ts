@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
   if (url.searchParams.get("sync") === "true") {
     return handleFullSync();
   }
+  if (url.searchParams.get("verify") === "true") {
+    return handleVerify();
+  }
   return handleBackfill();
 }
 
@@ -496,6 +499,139 @@ async function handleFullSync() {
     picksScored,
     bracketsRecalculated,
     details,
+  });
+}
+
+async function handleVerify() {
+  const adminClient = createAdminClient();
+
+  // Get all final games with teams
+  const { data: games } = await adminClient
+    .from("games")
+    .select("game_slot, round, winner_id, team_a_id, team_b_id, team_a:teams!team_a_id(name, seed), team_b:teams!team_b_id(name, seed)")
+    .eq("status", "final")
+    .not("winner_id", "is", null)
+    .order("game_slot", { ascending: true });
+
+  if (!games) {
+    return NextResponse.json({ error: "Failed to fetch games" }, { status: 500 });
+  }
+
+  // Build a map of game_slot -> game info for quick lookup
+  const gameMap = new Map(games.map((g) => [g.game_slot, g]));
+
+  // Get all brackets
+  const { data: brackets } = await adminClient
+    .from("brackets")
+    .select("id, name, score, user_id, profiles!inner(display_name)")
+    .eq("is_finalized", true);
+
+  if (!brackets) {
+    return NextResponse.json({ error: "Failed to fetch brackets" }, { status: 500 });
+  }
+
+  // Get all picks
+  const { data: allPicks } = await adminClient
+    .from("bracket_picks")
+    .select("id, bracket_id, game_slot, picked_team_id, is_correct, points_earned");
+
+  if (!allPicks) {
+    return NextResponse.json({ error: "Failed to fetch picks" }, { status: 500 });
+  }
+
+  // Group picks by bracket
+  const picksByBracket = new Map<string, typeof allPicks>();
+  for (const pick of allPicks) {
+    const existing = picksByBracket.get(pick.bracket_id) || [];
+    existing.push(pick);
+    picksByBracket.set(pick.bracket_id, existing);
+  }
+
+  const bracketResults = [];
+
+  for (const bracket of brackets) {
+    const picks = picksByBracket.get(bracket.id) || [];
+    let expectedScore = 0;
+    const pickDetails: Array<{
+      game_slot: number;
+      round: string;
+      picked_team_id: number;
+      winner_id: number;
+      correct: boolean;
+      expectedPoints: number;
+      storedPoints: number | null;
+      storedCorrect: boolean | null;
+      mismatch: boolean;
+    }> = [];
+
+    for (const pick of picks) {
+      const game = gameMap.get(pick.game_slot);
+      if (!game) continue; // game not final yet
+
+      const correct = pick.picked_team_id === game.winner_id;
+      let expectedPoints = 0;
+
+      if (correct) {
+        const basePoints = getRoundPoints(game.round);
+        const winnerTeam = game.winner_id === game.team_a_id ? game.team_a : game.team_b;
+        const loserTeam = game.winner_id === game.team_a_id ? game.team_b : game.team_a;
+        if (winnerTeam && loserTeam && isUpset(winnerTeam.seed, loserTeam.seed)) {
+          expectedPoints = Math.round(basePoints * 1.5);
+        } else {
+          expectedPoints = basePoints;
+        }
+      }
+
+      expectedScore += expectedPoints;
+
+      const hasMismatch =
+        pick.is_correct !== correct ||
+        (pick.points_earned ?? 0) !== expectedPoints;
+
+      if (hasMismatch) {
+        pickDetails.push({
+          game_slot: pick.game_slot,
+          round: game.round,
+          picked_team_id: pick.picked_team_id,
+          winner_id: game.winner_id,
+          correct,
+          expectedPoints,
+          storedPoints: pick.points_earned,
+          storedCorrect: pick.is_correct,
+          mismatch: true,
+        });
+      }
+    }
+
+    const profile = bracket.profiles as unknown as { display_name: string };
+    const storedScore = bracket.score ?? 0;
+    const scoreMismatch = storedScore !== expectedScore;
+
+    bracketResults.push({
+      bracketId: bracket.id,
+      name: bracket.name,
+      user: profile.display_name,
+      storedScore,
+      expectedScore,
+      scoreMismatch,
+      pickMismatches: pickDetails,
+      totalPicks: picks.length,
+      correctPicks: picks.filter((p) => {
+        const g = gameMap.get(p.game_slot);
+        return g && p.picked_team_id === g.winner_id;
+      }).length,
+    });
+  }
+
+  const allCorrect = bracketResults.every(
+    (b) => !b.scoreMismatch && b.pickMismatches.length === 0
+  );
+
+  return NextResponse.json({
+    verified: allCorrect,
+    totalBrackets: bracketResults.length,
+    totalGamesScored: games.length,
+    brackets: bracketResults,
   });
 }
 
