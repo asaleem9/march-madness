@@ -23,6 +23,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (opponent_id === user.id) {
+    return NextResponse.json(
+      { error: "You can't wager against yourself" },
+      { status: 400 }
+    );
+  }
+
   // Check wager deadline
   const { data: config } = await supabase
     .from("tournament_config")
@@ -122,6 +129,21 @@ export async function PATCH(request: NextRequest) {
   } else if (action === "accept") {
     if (wager.opponent_id !== user.id) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    // If a bracket is attached, it must belong to the accepting user.
+    if (bracket_id) {
+      const { data: ownBracket } = await admin
+        .from("brackets")
+        .select("id")
+        .eq("id", bracket_id)
+        .eq("user_id", user.id)
+        .single();
+      if (!ownBracket) {
+        return NextResponse.json(
+          { error: "Invalid bracket" },
+          { status: 400 }
+        );
+      }
     }
     const { error } = await admin
       .from("wagers")

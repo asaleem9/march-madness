@@ -123,11 +123,17 @@ export async function sendEmail(
 
 export function isInQuietHours(timezone: string): boolean {
   try {
-    const now = new Date();
-    const userTime = new Date(
-      now.toLocaleString("en-US", { timeZone: timezone })
-    );
-    const hour = userTime.getHours();
+    // Read the hour directly in the target timezone. Re-parsing a formatted
+    // date string (new Date(toLocaleString(...))) is fragile — some ICU builds
+    // emit narrow no-break spaces and yield Invalid Date / NaN.
+    const hourStr = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: timezone,
+    }).format(new Date());
+    // "24" can appear for midnight in the h24 cycle; normalize to 0.
+    const hour = parseInt(hourStr, 10) % 24;
+    if (Number.isNaN(hour)) return false;
     return hour >= 22 || hour < 8; // 10pm - 8am
   } catch {
     return false;

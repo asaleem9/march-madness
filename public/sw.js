@@ -7,8 +7,8 @@ self.addEventListener("push", function (event) {
 
   const options = {
     body: data.body || "You have a new update!",
-    icon: "/images/basketball-icon.png",
-    badge: "/images/badge-icon.png",
+    icon: "/images/logo.png",
+    badge: "/images/logo.png",
     vibrate: [100, 50, 100],
     data: {
       url: data.url || "/dashboard",
@@ -42,13 +42,16 @@ self.addEventListener("notificationclick", function (event) {
 
   event.waitUntil(
     clients.matchAll({ type: "window" }).then(function (clientList) {
-      // Focus existing window if available
+      // Navigate an existing window to the target and focus it
       for (const client of clientList) {
-        if (client.url.includes(url) && "focus" in client) {
+        if ("focus" in client) {
+          if ("navigate" in client) {
+            return client.navigate(url).then((c) => (c || client).focus());
+          }
           return client.focus();
         }
       }
-      // Otherwise open new window
+      // Otherwise open a new window
       if (clients.openWindow) {
         return clients.openWindow(url);
       }

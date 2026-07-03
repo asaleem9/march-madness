@@ -107,6 +107,7 @@ export function BracketBuilder({
     setBracketName,
     loadPicks,
     clearDownstreamPicks,
+    reset,
   } = useBracketStore();
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -118,7 +119,8 @@ export function BracketBuilder({
 
   const isEditable = isOwner && !isLocked && !finalized;
 
-  // Load existing picks
+  // Load existing picks — or reset the shared store when there are none, so a
+  // new bracket never inherits picks left behind from viewing someone else's.
   useEffect(() => {
     if (existingPicks) {
       loadPicks(
@@ -128,6 +130,8 @@ export function BracketBuilder({
           pickedTeamId: p.pickedTeamId,
         }))
       );
+    } else {
+      reset();
     }
     if (existingName) {
       setBracketName(existingName);

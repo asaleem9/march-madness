@@ -57,6 +57,11 @@ function fillAndSubmitForm() {
   fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), {
     target: { value: "password123" },
   });
+  // Confirm password is a required field — leaving it empty makes jsdom's
+  // form validation block submission, so fill it too.
+  fireEvent.change(screen.getByPlaceholderText("Retype your password"), {
+    target: { value: "password123" },
+  });
   fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 }
 
@@ -99,6 +104,9 @@ describe("SignupPage", () => {
       target: { value: "a@b.com" },
     });
     fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), {
+      target: { value: "short" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Retype your password"), {
       target: { value: "short" },
     });
 
@@ -224,7 +232,7 @@ describe("SignupPage", () => {
       expect(mockSignInWithOAuth).toHaveBeenCalledWith({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/callback?redirect=/dashboard`,
+          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/dashboard")}`,
         },
       });
     });
@@ -243,7 +251,7 @@ describe("SignupPage", () => {
       expect(mockSignInWithOAuth).toHaveBeenCalledWith({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/callback?redirect=/wagers`,
+          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
         },
       });
     });

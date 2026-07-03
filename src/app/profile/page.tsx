@@ -233,13 +233,13 @@ export default function ProfilePage() {
             onChange={(e) => setTimezone(e.target.value)}
             className="w-full border-2 border-navy p-3 font-body text-sm bg-cream"
           >
-            {Intl.supportedValuesOf("timeZone")
-              .filter((tz) => tz.startsWith("America/"))
-              .map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz.replace("America/", "").replace(/_/g, " ")}
-                </option>
-              ))}
+            {/* All zones (not just America/*) so non-US users can pick their own,
+                which drives quiet-hours in the notification pipeline. */}
+            {Intl.supportedValuesOf("timeZone").map((tz) => (
+              <option key={tz} value={tz}>
+                {tz.replace(/_/g, " ")}
+              </option>
+            ))}
           </select>
         </div>
 

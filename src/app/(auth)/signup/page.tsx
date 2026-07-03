@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { safeRedirectPath } from "@/lib/utils";
 
 export default function SignupPage() {
   return (
@@ -23,7 +24,7 @@ function SignupForm() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/dashboard";
+  const redirect = safeRedirectPath(searchParams.get("redirect"));
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -69,7 +70,7 @@ function SignupForm() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/callback?redirect=${redirect}`,
+        redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent(redirect)}`,
       },
     });
   };

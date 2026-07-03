@@ -17,6 +17,7 @@ const mockSetPick = vi.fn();
 const mockSetBracketName = vi.fn();
 const mockLoadPicks = vi.fn();
 const mockClearDownstreamPicks = vi.fn();
+const mockReset = vi.fn();
 
 let storePicks = new Map<number, { gameSlot: number; round: Round; pickedTeamId: number }>();
 let storeIsDirty = false;
@@ -31,6 +32,7 @@ vi.mock("@/hooks/useBracket", () => ({
     setBracketName: mockSetBracketName,
     loadPicks: mockLoadPicks,
     clearDownstreamPicks: mockClearDownstreamPicks,
+    reset: mockReset,
   }),
 }));
 

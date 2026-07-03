@@ -23,7 +23,7 @@ export default async function SchedulePage() {
     .order("scheduled_at", { ascending: true });
 
   // Fetch user's bracket picks if logged in
-  let userPicks: Record<number, number> = {};
+  const userPicks: Record<number, number> = {};
   if (user) {
     const { data: bracket } = await supabase
       .from("brackets")

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -37,6 +38,7 @@ export default function WagersPage() {
   >("pending");
   const [loading, setLoading] = useState(true);
   const [createError, setCreateError] = useState("");
+  const [respondError, setRespondError] = useState("");
   const [wagerDeadline, setWagerDeadline] = useState<string | null>(null);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<string | null>(null);
@@ -134,6 +136,7 @@ export default function WagersPage() {
 
   const handleRespond = async (wagerId: string, action: "accept" | "decline" | "revoke") => {
     setRespondingId(wagerId);
+    setRespondError("");
     const body: Record<string, string> = { wager_id: wagerId, action };
     if (action === "accept" && bracketId) {
       body.bracket_id = bracketId;
@@ -156,7 +159,7 @@ export default function WagersPage() {
         );
       } else {
         const data = await response.json().catch(() => null);
-        setCreateError(data?.error || "Something went wrong. Try again.");
+        setRespondError(data?.error || "Something went wrong. Try again.");
       }
     } finally {
       setRespondingId(null);
@@ -216,7 +219,7 @@ export default function WagersPage() {
           )}
           {brackets.length === 0 && (
             <div className="bg-gold/20 border-2 border-gold text-navy text-xs p-3 rounded">
-              You need to <a href="/bracket/new" className="text-burnt-orange font-bold hover:underline">create a bracket</a> before you can wager.
+              You need to <Link href="/bracket/new" className="text-burnt-orange font-bold hover:underline">create a bracket</Link> before you can wager.
             </div>
           )}
           <div>
@@ -277,6 +280,12 @@ export default function WagersPage() {
             Send Challenge
           </button>
         </form>
+      )}
+
+      {respondError && (
+        <div className="bg-burnt-orange/10 border-2 border-burnt-orange text-burnt-orange text-xs p-3 mb-4 rounded">
+          {respondError}
+        </div>
       )}
 
       {/* Tabs */}

@@ -2,8 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeError } from "@/lib/sanitizeError";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const REQUIRED_PICKS = 63;
+
+// The bracket lock deadline is the real cutoff for any pick changes. Picks are
+// written with the admin client (to bypass the RLS deadline clause during the
+// normal save flow), so this is the only place the deadline is enforced for
+// those writes — it must run before every insert/upsert.
+async function isPastDeadline(supabase: SupabaseClient): Promise<boolean> {
+  const { data: config } = await supabase
+    .from("tournament_config")
+    .select("bracket_lock_deadline")
+    .eq("id", 1)
+    .single();
+
+  if (!config?.bracket_lock_deadline) return false;
+  return new Date() > new Date(config.bracket_lock_deadline);
+}
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -17,6 +33,14 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
   const { name, picks, lock } = body;
+
+  // Enforce the lock deadline — no new brackets or picks once it passes
+  if (await isPastDeadline(supabase)) {
+    return NextResponse.json(
+      { error: "The bracket deadline has passed. Brackets are locked." },
+      { status: 403 }
+    );
+  }
 
   // Enforce one bracket per user
   const { data: existingBrackets } = await supabase
@@ -58,8 +82,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Insert picks (use admin client to bypass RLS deadline check —
-  // the API already validates the deadline in application code above)
+  // Insert picks with the admin client to bypass the RLS deadline clause.
+  // Safe because isPastDeadline() was already enforced above.
   if (picks && picks.length > 0) {
     const admin = createAdminClient();
     const pickRows = picks.map(
@@ -116,6 +140,14 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Bracket is locked" }, { status: 403 });
   }
 
+  // Once the deadline passes, no more edits — even for an unlocked bracket
+  if (await isPastDeadline(supabase)) {
+    return NextResponse.json(
+      { error: "The bracket deadline has passed. Brackets are locked." },
+      { status: 403 }
+    );
+  }
+
   // If locking, require all picks
   if (lock && (!picks || picks.length < REQUIRED_PICKS)) {
     return NextResponse.json(
@@ -136,7 +168,8 @@ export async function PUT(request: NextRequest) {
     .update(updateFields)
     .eq("id", bracketId);
 
-  // Replace picks atomically (use admin client to bypass RLS deadline check)
+  // Replace picks atomically with the admin client to bypass the RLS deadline
+  // clause. Safe because isPastDeadline()/locked were already enforced above.
   if (picks && picks.length > 0) {
     const admin = createAdminClient();
 
@@ -148,9 +181,11 @@ export async function PUT(request: NextRequest) {
         picked_team_id: p.picked_team_id,
       })
     );
-    const newGameSlots = picks.map(
-      (p: { game_slot: number }) => p.game_slot
-    );
+    // Coerce to integers so client-supplied values can't corrupt the
+    // "delete stale picks" filter below.
+    const newGameSlots = picks
+      .map((p: { game_slot: number }) => Number(p.game_slot))
+      .filter((n: number) => Number.isInteger(n));
 
     // Upsert new picks (safe — doesn't delete anything on failure)
     const { error: upsertError } = await admin

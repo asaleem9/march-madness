@@ -297,3 +297,9 @@ export const tournamentConfig = pgTable("tournament_config", {
     }),
   activePhase: tournamentPhaseEnum("active_phase").default("pre_tournament"),
 });
+
+export const emailWaitlist = pgTable("email_waitlist", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});

@@ -66,6 +66,15 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => mockSupabase),
 }));
 
+// Server client is used by the admin-session auth fallback. Default to no user
+// so only the CRON_SECRET path authorizes in these tests.
+const mockServerAuth = {
+  getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
+};
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: vi.fn(async () => ({ auth: mockServerAuth })),
+}));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const mockRequest = (headers?: Record<string, string>) =>
@@ -114,6 +123,7 @@ describe("POST /api/notifications/send-batch", () => {
     mockGetPreferredChannels.mockReset().mockReturnValue(["push"]);
     mockSupabase.from.mockClear();
     mockAuth.admin.getUserById.mockReset().mockResolvedValue({ data: { user: null } });
+    mockServerAuth.getUser.mockReset().mockResolvedValue({ data: { user: null } });
 
     process.env.CRON_SECRET = "test-cron-secret";
 
@@ -245,6 +255,7 @@ describe("POST /api/notifications/send-batch", () => {
         });
         builder.update.mockReturnValue({
           in: vi.fn().mockResolvedValue({ data: null, error: null }),
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
         });
       }
 
@@ -287,6 +298,7 @@ describe("POST /api/notifications/send-batch", () => {
         });
         builder.update.mockReturnValue({
           in: vi.fn().mockResolvedValue({ data: null, error: null }),
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
         });
       }
 
@@ -349,6 +361,7 @@ describe("POST /api/notifications/send-batch", () => {
         });
         builder.update.mockReturnValue({
           in: vi.fn().mockResolvedValue({ data: null, error: null }),
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
         });
       }
 
@@ -433,6 +446,7 @@ describe("POST /api/notifications/send-batch", () => {
         });
         builder.update.mockReturnValue({
           in: vi.fn().mockResolvedValue({ data: null, error: null }),
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
         });
       }
 

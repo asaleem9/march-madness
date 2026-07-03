@@ -28,6 +28,9 @@ export function getRoundPoints(
       return multipliers.final_four;
     case "championship":
       return multipliers.championship;
+    default:
+      // Defensive: an unexpected round value shouldn't yield NaN points.
+      return 0;
   }
 }
 
@@ -53,6 +56,22 @@ export function formatTime(date: Date | string): string {
 
 export function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(" ");
+}
+
+// Only allow same-origin relative redirects. Rejects absolute URLs, protocol-
+// relative "//evil.com", backslash tricks, and the "@evil.com" userinfo trick
+// (which resolves to a different host once prefixed with the origin).
+export function safeRedirectPath(
+  redirect: string | null | undefined,
+  fallback = "/dashboard"
+): string {
+  if (!redirect) return fallback;
+  // Must be a path rooted at "/", but not "//" or "/\" (both can change host).
+  if (!redirect.startsWith("/")) return fallback;
+  if (redirect.startsWith("//") || redirect.startsWith("/\\")) return fallback;
+  // No embedded userinfo/host or scheme.
+  if (redirect.includes("@") || redirect.includes("://")) return fallback;
+  return redirect;
 }
 
 export const ROUND_DISPLAY_NAMES: Record<Round, string> = {
