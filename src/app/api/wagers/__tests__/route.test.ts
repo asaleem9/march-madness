@@ -292,6 +292,8 @@ describe("PATCH /api/wagers", () => {
         },
         error: null,
       },
+      // The accept path verifies the attached bracket belongs to the opponent.
+      brackets: { data: { id: "b-55" }, error: null },
     });
 
     const res = await PATCH(

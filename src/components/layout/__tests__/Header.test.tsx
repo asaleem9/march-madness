@@ -16,6 +16,14 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// next/image's real loader throws on relative src under jsdom — render a plain img.
+vi.mock("next/image", () => ({
+  default: ({ src, alt }: { src: string; alt: string }) => (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={typeof src === "string" ? src : ""} alt={alt} />
+  ),
+}));
+
 const mockSignOut = vi.fn().mockResolvedValue({});
 let mockUser: { id: string; email: string } | null = null;
 

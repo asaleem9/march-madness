@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import {
   sendPushNotification,
   sendSMS,
@@ -8,10 +9,41 @@ import {
   getPreferredChannels,
 } from "@/lib/notifications";
 
-export async function POST(request: NextRequest) {
-  // Verify cron secret
+const adminEmails = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
+
+// Allow either the cron secret (Vercel Cron) or a signed-in admin (the manual
+// "Send Notifications" button on the admin dashboard).
+async function authorize(request: NextRequest): Promise<boolean> {
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (
+    process.env.CRON_SECRET &&
+    authHeader === `Bearer ${process.env.CRON_SECRET}`
+  ) {
+    return true;
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return !!user?.email && adminEmails.includes(user.email);
+}
+
+// Vercel Cron invokes endpoints with GET, so expose both. Both require the
+// CRON_SECRET bearer token (Vercel injects it automatically when the env var
+// is set).
+export async function GET(request: NextRequest) {
+  return handleSendBatch(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleSendBatch(request);
+}
+
+async function handleSendBatch(request: NextRequest) {
+  if (!(await authorize(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -99,7 +131,10 @@ export async function POST(request: NextRequest) {
 
     const channels = getPreferredChannels(prefs);
 
-    // Send via each channel
+    // Send via each channel, tracking whether anything was delivered.
+    let anySuccess = false;
+    let deliveredChannel: string | null = null;
+
     for (const channel of channels) {
       let success = false;
 
@@ -143,23 +178,43 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      if (success) {
-        await supabase.from("notifications_log").insert({
-          user_id: userId,
-          message,
-          channel,
-        });
+      if (success && !anySuccess) {
+        anySuccess = true;
+        deliveredChannel = channel;
       }
     }
 
-    // Mark queue items as sent
     const itemIds = items.map((i) => i.id);
-    await supabase
-      .from("notification_queue")
-      .update({ sent: true })
-      .in("id", itemIds);
 
-    sent += items.length;
+    if (anySuccess) {
+      // Log one entry per delivered notification (not per channel) so the daily
+      // cap means "3 notifications", not "3 channel-sends".
+      await supabase.from("notifications_log").insert({
+        user_id: userId,
+        message,
+        channel: deliveredChannel,
+      });
+
+      // Only clear the queue once something was actually delivered.
+      await supabase
+        .from("notification_queue")
+        .update({ sent: true })
+        .in("id", itemIds);
+
+      sent += items.length;
+    } else {
+      // Nothing delivered — bump attempts and retry next run, but give up after
+      // MAX_ATTEMPTS so a permanently-undeliverable item doesn't loop forever.
+      const MAX_ATTEMPTS = 5;
+      for (const item of items) {
+        const attempts = ((item.attempts as number) ?? 0) + 1;
+        await supabase
+          .from("notification_queue")
+          .update({ attempts, sent: attempts >= MAX_ATTEMPTS })
+          .eq("id", item.id);
+      }
+      skipped += items.length;
+    }
   }
 
   return NextResponse.json({

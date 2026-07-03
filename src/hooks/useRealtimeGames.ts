@@ -1,12 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+// Subscribe to game changes and re-fetch the server-rendered page data when a
+// game updates. The pages that show live data (schedule, etc.) are server
+// components, so router.refresh() is what actually re-renders them — plain
+// query-cache invalidation had no subscribers and did nothing.
 export function useRealtimeGames() {
-  const queryClient = useQueryClient();
-  const supabase = createClient();
+  const router = useRouter();
+  // Memoize the client so the effect below doesn't tear down and re-subscribe
+  // on every render (createClient() returns a new object each call).
+  const [supabase] = useState(() => createClient());
 
   useEffect(() => {
     const channel = supabase
@@ -19,10 +25,7 @@ export function useRealtimeGames() {
           table: "games",
         },
         () => {
-          // Invalidate all game-related queries when any game changes
-          queryClient.invalidateQueries({ queryKey: ["games"] });
-          queryClient.invalidateQueries({ queryKey: ["schedule"] });
-          queryClient.invalidateQueries({ queryKey: ["leaderboard"] });
+          router.refresh();
         }
       )
       .subscribe();
@@ -30,5 +33,5 @@ export function useRealtimeGames() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, queryClient]);
+  }, [supabase, router]);
 }

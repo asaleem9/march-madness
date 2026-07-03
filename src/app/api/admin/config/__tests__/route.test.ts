@@ -116,7 +116,7 @@ describe("PUT /api/admin/config", () => {
 
     const request = new NextRequest("http://localhost:3000/api/admin/config", {
       method: "PUT",
-      body: JSON.stringify({ bracket_lock_date: "2026-03-20T00:00:00Z" }),
+      body: JSON.stringify({ bracket_lock_deadline: "2026-03-20T00:00:00Z" }),
       headers: { "Content-Type": "application/json" },
     });
 

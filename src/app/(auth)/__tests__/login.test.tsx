@@ -160,7 +160,7 @@ describe("LoginPage", () => {
       expect(mockSignInWithOAuth).toHaveBeenCalledWith({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/callback?redirect=/wagers`,
+          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
         },
       });
     });

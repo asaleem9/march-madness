@@ -1,3 +1,7 @@
 {
-  "alias": ["bracketmadness.vercel.app"]
+  "alias": ["bracketmadness.vercel.app"],
+  "crons": [
+    { "path": "/api/cron/update-scores", "schedule": "0 12 * * *" },
+    { "path": "/api/notifications/send-batch", "schedule": "0 13 * * *" }
+  ]
 }

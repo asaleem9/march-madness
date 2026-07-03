@@ -152,11 +152,15 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                 </div>
                 {game.scheduled_at && game.status === "scheduled" && (
                   <div className="text-[0.55rem] text-navy/50 mt-2">
+                    {/* Pinned to Eastern so the server (UTC) and client render the
+                        same string — avoids a hydration mismatch. */}
                     {new Date(game.scheduled_at).toLocaleString("en-US", {
                       month: "short",
                       day: "numeric",
                       hour: "numeric",
                       minute: "2-digit",
+                      timeZone: "America/New_York",
+                      timeZoneName: "short",
                     })}
                   </div>
                 )}

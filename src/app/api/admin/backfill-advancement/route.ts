@@ -1,10 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchESPNScoreboard, parseGameStatus, formatDateForESPN } from "@/lib/espn";
+import {
+  fetchESPNScoreboard,
+  parseGameStatus,
+  formatDateForESPN,
+  type ESPNEvent,
+} from "@/lib/espn";
 import { getRoundPoints, isUpset } from "@/lib/utils";
 
-const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim());
+type ESPNCompetition = ESPNEvent["competitions"][number];
+
+export const maxDuration = 300;
+
+const adminEmails = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
 
 async function isAdmin() {
   const supabase = await createClient();
@@ -246,7 +258,7 @@ async function handleFullSync() {
   details.push(`Scanning ${dates.length} days of ESPN data...`);
 
   // Collect all ESPN events across the tournament
-  const allEvents: Array<{ event: any; competition: any }> = [];
+  const allEvents: Array<{ event: ESPNEvent; competition: ESPNCompetition }> = [];
   for (const date of dates) {
     const scoreboard = await fetchESPNScoreboard(date);
     if (scoreboard) {
@@ -261,7 +273,7 @@ async function handleFullSync() {
   details.push(`Found ${allEvents.length} total ESPN games across tournament`);
 
   // Build ESPN event lookup by competition ID
-  const espnById = new Map<string, any>();
+  const espnById = new Map<string, ESPNCompetition>();
   for (const { competition } of allEvents) {
     espnById.set(competition.id, competition);
   }
@@ -287,14 +299,14 @@ async function handleFullSync() {
 
     let winnerId: number | null = null;
     if (status === "final") {
-      const winnerComp = competitors.find((c: any) => c.winner);
+      const winnerComp = competitors.find((c) => c.winner);
       if (winnerComp) {
         if (game.team_a?.espn_id === winnerComp.team.id) winnerId = game.team_a_id;
         else if (game.team_b?.espn_id === winnerComp.team.id) winnerId = game.team_b_id;
       }
     }
 
-    const updates: Record<string, any> = { status };
+    const updates: Record<string, unknown> = { status };
     if (scoreA != null) updates.score_a = scoreA;
     if (scoreB != null) updates.score_b = scoreB;
     if (winnerId) updates.winner_id = winnerId;
@@ -350,8 +362,8 @@ async function handleFullSync() {
         if (game.team_a && game.team_b) {
           for (const { event, competition } of allEvents) {
             if (claimedIds.has(competition.id)) continue;
-            const cIds = competition.competitors.map((c: any) => c.team.id);
-            const cNames = competition.competitors.map((c: any) => c.team.displayName);
+            const cIds = competition.competitors.map((c) => c.team.id);
+            const cNames = competition.competitors.map((c) => c.team.displayName);
             const aHit = cIds.includes(game.team_a.espn_id);
             const bHit = cIds.includes(game.team_b.espn_id);
             if (aHit || bHit) {
@@ -367,7 +379,7 @@ async function handleFullSync() {
         if (claimedIds.has(competition.id)) continue;
 
         const competitors = competition.competitors;
-        const espnTeamIds = competitors.map((c: any) => c.team.id);
+        const espnTeamIds = competitors.map((c) => c.team.id);
 
         const teamAMatch = game.team_a && espnTeamIds.includes(game.team_a.espn_id);
         const teamBMatch = game.team_b && espnTeamIds.includes(game.team_b.espn_id);
@@ -394,7 +406,7 @@ async function handleFullSync() {
 
           let winnerId: number | null = null;
           if (status === "final") {
-            const winnerComp = competitors.find((c: any) => c.winner);
+            const winnerComp = competitors.find((c) => c.winner);
             if (winnerComp) {
               if (game.team_a?.espn_id === winnerComp.team.id) {
                 winnerId = game.team_a_id;

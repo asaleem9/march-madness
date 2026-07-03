@@ -4,7 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRoundPoints, isUpset } from "@/lib/utils";
 import { sanitizeError } from "@/lib/sanitizeError";
 
-const adminEmails = (process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim());
+const adminEmails = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
 
 async function isAdmin(request: NextRequest) {
   const supabase = await createClient();

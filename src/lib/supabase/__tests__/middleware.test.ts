@@ -179,16 +179,6 @@ describe("updateSession", () => {
       expect(redirectUrl.searchParams.get("redirect")).toBe("/admin");
     });
 
-    it("redirects /schedule to /login?redirect=/schedule", async () => {
-      mockUnauthenticated();
-      const request = createMockRequest("/schedule");
-      const response = await updateSession(request);
-
-      expect(response.type).toBe("redirect");
-      const redirectUrl = (NextResponse.redirect as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
-      expect(redirectUrl.pathname).toBe("/login");
-      expect(redirectUrl.searchParams.get("redirect")).toBe("/schedule");
-    });
   });
 
   describe("unauthenticated user on public routes", () => {
@@ -204,6 +194,15 @@ describe("updateSession", () => {
     it("passes through on /leaderboard without redirecting", async () => {
       mockUnauthenticated();
       const request = createMockRequest("/leaderboard");
+      const response = await updateSession(request);
+
+      expect(response.type).toBe("next");
+      expect(NextResponse.redirect).not.toHaveBeenCalled();
+    });
+
+    it("passes through on /schedule without redirecting (public)", async () => {
+      mockUnauthenticated();
+      const request = createMockRequest("/schedule");
       const response = await updateSession(request);
 
       expect(response.type).toBe("next");

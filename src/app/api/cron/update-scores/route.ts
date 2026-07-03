@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchESPNScoreboard, parseGameStatus, formatDateForESPN } from "@/lib/espn";
 import { getRoundPoints, isUpset } from "@/lib/utils";
 
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   // Verify cron secret
   const authHeader = request.headers.get("authorization");
@@ -119,24 +121,32 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Update game (idempotent) — also sync scheduled_at from ESPN
+      // Build the update defensively so a partial/regressed ESPN payload can't
+      // clobber a good final: never downgrade a recorded final, never null out
+      // an existing score or winner.
+      const updates: Record<string, unknown> = {
+        scheduled_at: competition.date,
+      };
+      if (!(game.status === "final" && status !== "final")) {
+        updates.status = status;
+      }
+      if (scoreA !== null) updates.score_a = scoreA;
+      if (scoreB !== null) updates.score_b = scoreB;
+      if (winnerId) updates.winner_id = winnerId;
+
       const { error } = await supabase
         .from("games")
-        .update({
-          status,
-          score_a: scoreA,
-          score_b: scoreB,
-          winner_id: winnerId,
-          scheduled_at: competition.date,
-        })
+        .update(updates)
         .eq("id", game.id);
 
       if (!error) gamesUpdated++;
 
-      // If game is final with a winner, process results
+      // If game is final with a winner, process results.
       // Always advance winner and fix eliminations (idempotent).
-      // Only score picks and notify on the first transition to final.
-      const isNewlyFinal = game.status !== "final";
+      // Score picks and notify when the winner first becomes known — which
+      // covers games ESPN marked final before it set the winner flag, not just
+      // the status transition.
+      const winnerNewlyKnown = !!winnerId && winnerId !== game.winner_id;
       if (status === "final" && winnerId) {
         // Mark losing team as eliminated
         const loserId =
@@ -171,8 +181,8 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Score picks and notify only on the first transition to final
-        if (isNewlyFinal) {
+        // Score picks and notify only when the winner first becomes known
+        if (winnerNewlyKnown) {
           // Update bracket picks for this game
           const { data: picks } = await supabase
             .from("bracket_picks")
@@ -267,11 +277,106 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Once the tournament is over, settle any accepted wagers.
+  const wagersResolved = await resolveCompletedWagers(supabase);
+
   return NextResponse.json({
     message: "Scores updated",
     gamesUpdated,
     gamesDiscovered,
     scoresRecalculated,
+    wagersResolved,
     timestamp: new Date().toISOString(),
   });
+}
+
+// Resolve accepted wagers by comparing final bracket scores. Runs only after
+// the championship (slot 67) is final; idempotent because it only touches
+// wagers still in the "accepted" state.
+async function resolveCompletedWagers(
+  supabase: ReturnType<typeof createAdminClient>
+): Promise<number> {
+  const { data: champ } = await supabase
+    .from("games")
+    .select("status, winner_id")
+    .eq("game_slot", 67)
+    .single();
+
+  if (!champ || champ.status !== "final" || !champ.winner_id) return 0;
+
+  const { data: wagers } = await supabase
+    .from("wagers")
+    .select("*")
+    .eq("status", "accepted");
+
+  if (!wagers || wagers.length === 0) return 0;
+
+  let resolved = 0;
+  const nowIso = new Date().toISOString();
+
+  for (const wager of wagers) {
+    const { data: challengerBracket } = await supabase
+      .from("brackets")
+      .select("score")
+      .eq("id", wager.challenger_bracket_id)
+      .single();
+
+    // Use the explicitly-wagered opponent bracket, else fall back to their
+    // primary bracket.
+    let opponentScore = 0;
+    if (wager.opponent_bracket_id) {
+      const { data } = await supabase
+        .from("brackets")
+        .select("score")
+        .eq("id", wager.opponent_bracket_id)
+        .single();
+      opponentScore = data?.score ?? 0;
+    } else {
+      const { data } = await supabase
+        .from("brackets")
+        .select("score")
+        .eq("user_id", wager.opponent_id)
+        .eq("is_primary", true)
+        .limit(1)
+        .maybeSingle();
+      opponentScore = data?.score ?? 0;
+    }
+
+    const challengerScore = challengerBracket?.score ?? 0;
+
+    let winnerId: string | null = null;
+    if (challengerScore > opponentScore) winnerId = wager.challenger_id;
+    else if (opponentScore > challengerScore) winnerId = wager.opponent_id;
+    // Equal scores → resolved with no winner (a tie).
+
+    await supabase
+      .from("wagers")
+      .update({ status: "resolved", winner_id: winnerId, resolved_at: nowIso })
+      .eq("id", wager.id);
+
+    await supabase.from("notification_queue").insert([
+      {
+        user_id: wager.challenger_id,
+        type: "wager_result" as const,
+        payload: {
+          wager_id: wager.id,
+          won: winnerId === wager.challenger_id,
+          tie: winnerId === null,
+        },
+      },
+      {
+        user_id: wager.opponent_id,
+        type: "wager_result" as const,
+        payload: {
+          wager_id: wager.id,
+          won: winnerId === wager.opponent_id,
+          tie: winnerId === null,
+        },
+      },
+    ]);
+
+    resolved++;
+  }
+
+  return resolved;
 }

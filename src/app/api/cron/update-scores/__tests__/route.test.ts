@@ -762,16 +762,14 @@ describe("GET /api/cron/update-scores", () => {
     const res = await GET(mockRequest({ authorization: "Bearer test-cron-secret" }));
     expect(res.status).toBe(200);
 
-    // The game update itself is idempotent (always runs), but the "just went final"
-    // block should NOT run because game.status === "final" already.
-    // There should be the initial game update, but no teams, bracket_picks, brackets,
-    // or notification_queue updates.
-    const teamUpdates = updateCalls.filter((c) => c.table === "teams");
+    // The winner was already known (game.winner_id === computed winner), so the
+    // scoring pipeline must NOT re-run: no pick re-scoring, no bracket score
+    // recalc, no re-queued notifications. Winner advancement / elimination may
+    // still run — that path is intentionally idempotent and self-healing.
     const pickUpdates = updateCalls.filter((c) => c.table === "bracket_picks");
     const bracketUpdates = updateCalls.filter((c) => c.table === "brackets");
     const notifInserts = updateCalls.filter((c) => c.table === "notification_queue");
 
-    expect(teamUpdates).toHaveLength(0);
     expect(pickUpdates).toHaveLength(0);
     expect(bracketUpdates).toHaveLength(0);
     expect(notifInserts).toHaveLength(0);

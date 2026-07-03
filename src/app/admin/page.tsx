@@ -113,11 +113,17 @@ export default function AdminPage() {
   };
 
   const handleSendNotifications = async () => {
-    await fetch("/api/notifications/send-batch", {
+    // Authenticated as an admin via session cookie — the endpoint accepts either
+    // the cron secret or an admin session, so no client-side secret is needed
+    // (and none should ever be exposed to the browser).
+    const res = await fetch("/api/notifications/send-batch", {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
     });
-    alert("Batch notification send triggered");
+    alert(
+      res.ok
+        ? "Batch notification send triggered"
+        : "Failed to trigger notifications"
+    );
   };
 
   if (loading) {
