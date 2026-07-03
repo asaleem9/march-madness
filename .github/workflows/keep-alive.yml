@@ -1,0 +1,15 @@
+name: Keep Supabase awake
+
+# Pings the app's keep-alive endpoint on a schedule so the free-tier Supabase
+# database registers activity and doesn't auto-pause after ~7 days idle.
+on:
+  schedule:
+    - cron: "0 9 * * *" # daily at 09:00 UTC
+  workflow_dispatch: {} # allow manual runs
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping keep-alive endpoint
+        run: curl -fsSL --retry 3 --max-time 30 https://bracketmadness.vercel.app/api/keep-alive
