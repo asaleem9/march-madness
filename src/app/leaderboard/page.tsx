@@ -46,9 +46,10 @@ export default async function LeaderboardPage() {
       </p>
 
       <div className="retro-card overflow-hidden">
-        <div className="scoreboard-heading text-[0.55rem] flex justify-between px-6">
-          <span>RANK</span>
-          <span>PLAYER</span>
+        {/* Mirror the row layout below so columns line up. */}
+        <div className="scoreboard-heading text-[0.55rem] flex items-center px-6">
+          <span className="min-w-[60px]">RANK</span>
+          <span className="flex-1">PLAYER</span>
           <span>SCORE</span>
         </div>
 
@@ -145,8 +146,16 @@ export default async function LeaderboardPage() {
             })}
           </div>
         ) : (
-          <div className="text-center py-12 text-navy/50 text-sm">
-            No brackets submitted yet. Be the first!
+          <div className="text-center py-12">
+            <p className="text-navy/60 text-sm mb-5">
+              No brackets submitted yet. Be the first!
+            </p>
+            <Link
+              href="/bracket/new"
+              className="retro-btn retro-btn-primary inline-block"
+            >
+              Create Your Bracket
+            </Link>
           </div>
         )}
       </div>

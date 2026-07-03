@@ -3,7 +3,9 @@
 @theme {
   --color-navy: #1a1a2e;
   --color-navy-light: #242447;
-  --color-burnt-orange: #e94560;
+  /* Darkened from #e94560 so white-on-accent and accent-text-on-cream clear
+     WCAG AA contrast (~4.9:1 on white) while keeping the coral-red identity. */
+  --color-burnt-orange: #d62b4c;
   --color-cream: #f5f0e1;
   --color-cream-dark: #e8e0cc;
   --color-gold: #d4a843;
@@ -19,6 +21,19 @@ body {
   font-family: var(--font-body);
   background-color: var(--color-cream);
   color: var(--color-navy);
+}
+
+/* Respect users who prefer reduced motion — kill the decorative loops
+   (title-glow, confetti, trophy-bounce, logo-pulse, basketball bounce, pulses). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Paper/cardboard texture background */
@@ -49,9 +64,12 @@ body {
   transition: transform 0.1s, box-shadow 0.1s;
 }
 
-.retro-card:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 8px 8px 0 var(--color-navy);
+/* Only lift on real hover-capable pointers so it doesn't fire awkwardly on tap. */
+@media (hover: hover) {
+  .retro-card:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 8px 8px 0 var(--color-navy);
+  }
 }
 
 /* Retro button */
@@ -75,6 +93,11 @@ body {
 .retro-btn:active {
   transform: translate(2px, 2px);
   box-shadow: 2px 2px 0 var(--color-navy);
+}
+
+.retro-btn:focus-visible {
+  outline: 3px solid var(--color-gold);
+  outline-offset: 3px;
 }
 
 .retro-btn-primary {
@@ -176,6 +199,13 @@ body {
 
 .game-slot-team:hover {
   background-color: var(--color-cream);
+}
+
+.game-slot-team:focus-visible {
+  outline: 3px solid var(--color-gold);
+  outline-offset: -3px;
+  position: relative;
+  z-index: 1;
 }
 
 .game-slot-team.selected {

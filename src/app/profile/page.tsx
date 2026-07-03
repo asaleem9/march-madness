@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { Loader } from "@/components/Loader";
 
 export default function ProfilePage() {
   const supabase = createClient();
@@ -174,10 +175,8 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-8 text-center">
-        <span className="font-display text-xs text-navy/50 animate-pulse">
-          Loading...
-        </span>
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <Loader />
       </div>
     );
   }

@@ -109,7 +109,7 @@ export function ScheduleClient({ games, userPicks = {} }: ScheduleClientProps) {
                                 />
                               ) : (
                                 <div className="w-5 h-5 rounded-full bg-navy/15 shrink-0 flex items-center justify-center">
-                                  <span className="text-[0.3rem] font-display text-navy">
+                                  <span className="text-[0.45rem] font-display text-navy">
                                     {team.abbreviation}
                                   </span>
                                 </div>

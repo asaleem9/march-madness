@@ -69,7 +69,7 @@ function TeamRow({
         title={`Winner of ${firstFourHint.teamAName} vs ${firstFourHint.teamBName}`}
       >
         <div className="w-6 h-6 rounded-full bg-gold/20 shrink-0 flex items-center justify-center">
-          <span className="text-[0.3rem] font-display text-navy">FF</span>
+          <span className="text-[0.45rem] font-display text-navy">FF</span>
         </div>
         <span className="font-body text-xs flex-1">
           <span
@@ -140,6 +140,24 @@ function TeamRow({
     <div
       className={teamClass}
       onClick={() => isEditable && team && onClick()}
+      onKeyDown={(e) => {
+        if (isEditable && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      role={isEditable ? "button" : undefined}
+      tabIndex={isEditable ? 0 : undefined}
+      aria-pressed={isEditable ? isSelected : undefined}
+      aria-label={
+        isCorrectPick
+          ? `${team.name} — correct pick`
+          : isIncorrectPick
+            ? `${team.name} — wrong pick`
+            : isActiveSelection
+              ? `${team.name} — your pick`
+              : team.name
+      }
       title={team.name}
     >
       {team.logoUrl ? (
@@ -150,7 +168,7 @@ function TeamRow({
         />
       ) : (
         <div className="w-6 h-6 rounded-full bg-navy/15 shrink-0 flex items-center justify-center">
-          <span className="text-[0.3rem] font-display text-navy">
+          <span className="text-[0.45rem] font-display text-navy">
             {team.abbreviation}
           </span>
         </div>
@@ -159,6 +177,18 @@ function TeamRow({
       <span className="font-body text-xs flex-1 truncate">
         {truncateName(team.name)}
       </span>
+
+      {/* Non-color cue so correct/wrong/picked don't rely on green vs red alone */}
+      {isCorrectPick && (
+        <span className="shrink-0 text-white text-[0.6rem] font-bold" aria-hidden="true">
+          ✓
+        </span>
+      )}
+      {isIncorrectPick && (
+        <span className="shrink-0 text-white/80 text-[0.6rem] font-bold" aria-hidden="true">
+          ✗
+        </span>
+      )}
 
       {score != null && gameStatus === "final" ? (
         <span
@@ -191,7 +221,6 @@ function TeamRow({
                       : "text-navy/35"
             )}
           >
-            {probability >= 1 ? "+" : ""}
             {oddsStr}
           </span>
           <span

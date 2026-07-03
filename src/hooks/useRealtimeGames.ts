@@ -15,23 +15,29 @@ export function useRealtimeGames() {
   const [supabase] = useState(() => createClient());
 
   useEffect(() => {
-    const channel = supabase
-      .channel("games-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "games",
-        },
-        () => {
-          router.refresh();
-        }
-      )
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    // Only open the Realtime socket for authenticated users. The anon socket
+    // fails auth and retries forever (console spam + wasted battery) with no
+    // benefit, since logged-out visitors get no live updates anyway.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled || !session) return;
+      channel = supabase
+        .channel("games-realtime")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "games" },
+          () => {
+            router.refresh();
+          }
+        )
+        .subscribe();
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
     };
   }, [supabase, router]);
 }
