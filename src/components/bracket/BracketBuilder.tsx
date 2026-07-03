@@ -412,8 +412,8 @@ export function BracketBuilder({
             <span className="text-navy/70">Final score</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="inline-block text-gold font-bold text-[0.55rem]">+350</span>
-            <span className="text-navy/70">Win odds</span>
+            <span className="inline-block text-gold font-bold text-[0.55rem]">23%</span>
+            <span className="text-navy/70">Win chance</span>
           </div>
         </div>
       </div>
@@ -440,7 +440,7 @@ export function BracketBuilder({
               `}
             >
               <div>{STEP_LABELS[step].toUpperCase()}</div>
-              <div className={`text-[0.35rem] mt-0.5 ${isCurrent ? "text-gold/70" : isComplete ? "text-white/70" : "text-navy/50"}`}>
+              <div className={`text-[0.5rem] mt-0.5 ${isCurrent ? "text-gold/70" : isComplete ? "text-white/70" : "text-navy/50"}`}>
                 {made}/{total}
               </div>
             </button>

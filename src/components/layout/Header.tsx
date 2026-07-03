@@ -22,6 +22,12 @@ export function Header() {
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // "Bracket" (href /bracket/new) should stay active while viewing /bracket/[id].
+  const isActive = (href: string) =>
+    href === "/bracket/new"
+      ? pathname?.startsWith("/bracket")
+      : pathname?.startsWith(href);
   // Memoize so the auth listener isn't re-subscribed on every render.
   const [supabase] = useState<SupabaseClient>(() => createClient());
 
@@ -48,14 +54,14 @@ export function Header() {
         <div className="flex items-center justify-between h-16">
           <Link
             href="/"
-            className="font-display text-gold text-xs sm:text-sm tracking-wider hover:text-burnt-orange transition-colors flex items-center gap-2"
+            className="font-display text-gold text-[0.6rem] sm:text-sm tracking-wide hover:text-burnt-orange transition-colors flex items-center gap-2 whitespace-nowrap"
           >
             <Image
               src="/images/logo.png"
               alt="March Madness"
               width={28}
               height={28}
-              className="rounded"
+              className="rounded shrink-0"
             />
             MARCH MADNESS
           </Link>
@@ -69,7 +75,7 @@ export function Header() {
                   href={link.href}
                   className={cn(
                     "font-body text-xs px-3 py-2 rounded transition-colors",
-                    pathname?.startsWith(link.href)
+                    isActive(link.href)
                       ? "bg-forest text-cream"
                       : "text-cream-dark hover:text-gold"
                   )}

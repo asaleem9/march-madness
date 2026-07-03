@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { Loader } from "@/components/Loader";
 
 interface Wager {
   id: string;
@@ -173,10 +174,8 @@ export default function WagersPage() {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8 text-center">
-        <span className="font-display text-xs text-navy/50 animate-pulse">
-          Loading...
-        </span>
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <Loader />
       </div>
     );
   }

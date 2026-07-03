@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { Loader } from "@/components/Loader";
 
 interface GameForAdmin {
   id: number;
@@ -128,10 +129,8 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-8 text-center">
-        <span className="font-display text-xs text-navy/50 animate-pulse">
-          Loading...
-        </span>
+      <div className="max-w-6xl mx-auto px-4 py-8">
+        <Loader />
       </div>
     );
   }
