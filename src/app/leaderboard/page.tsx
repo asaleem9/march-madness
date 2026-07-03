@@ -136,7 +136,7 @@ export default async function LeaderboardPage() {
                     </div>
                     <Link
                       href={`/bracket/${bracket.id}`}
-                      className="text-[0.5rem] text-burnt-orange hover:underline"
+                      className="inline-block text-[0.6rem] text-burnt-orange hover:underline py-1"
                     >
                       View Bracket
                     </Link>

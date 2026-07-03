@@ -51,7 +51,7 @@ function fillAndSubmit(email: string, password: string) {
   fireEvent.change(screen.getByPlaceholderText("your@email.com"), {
     target: { value: email },
   });
-  fireEvent.change(screen.getByPlaceholderText("********"), {
+  fireEvent.change(screen.getByPlaceholderText("Enter your password"), {
     target: { value: password },
   });
   fireEvent.click(screen.getByRole("button", { name: /log in/i }));
@@ -77,7 +77,7 @@ describe("LoginPage", () => {
     expect(
       screen.getByPlaceholderText("your@email.com"),
     ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("********")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /log in/i }),
     ).toBeInTheDocument();

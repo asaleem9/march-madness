@@ -136,7 +136,8 @@ function SignupForm() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               required
-              className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+              autoComplete="nickname"
+              className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
               placeholder="BracketKing42"
             />
           </div>
@@ -149,7 +150,8 @@ function SignupForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+              autoComplete="email"
+              className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
               placeholder="your@email.com"
             />
           </div>
@@ -163,7 +165,8 @@ function SignupForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+              autoComplete="new-password"
+              className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
               placeholder="Min. 6 characters"
             />
           </div>
@@ -177,7 +180,8 @@ function SignupForm() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+              autoComplete="new-password"
+              className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
               placeholder="Retype your password"
             />
           </div>

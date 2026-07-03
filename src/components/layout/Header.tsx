@@ -132,20 +132,14 @@ export function Header() {
                 </button>
               </>
             ) : (
-              <div className="flex items-center gap-1.5 sm:gap-3">
-                <Link
-                  href="/scoring"
-                  className="text-[0.6rem] sm:text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
-                >
-                  Scoring
-                </Link>
+              <div className="flex items-center gap-4 sm:gap-5">
                 <Link
                   href="/login"
-                  className="text-[0.6rem] sm:text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
+                  className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap"
                 >
                   Log In
                 </Link>
-                <Link href="/signup" className="retro-btn retro-btn-primary text-[0.5rem] sm:text-[0.55rem] whitespace-nowrap">
+                <Link href="/signup" className="retro-btn retro-btn-primary text-[0.55rem] whitespace-nowrap">
                   Sign Up
                 </Link>
               </div>
