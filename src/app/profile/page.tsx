@@ -15,6 +15,10 @@ export default function ProfilePage() {
   const [phone, setPhone] = useState("");
   const [timezone, setTimezone] = useState("");
   const [pushEnabled, setPushEnabled] = useState(true);
+  // Whether this browser actually has a live push subscription (separate from
+  // the on/off *preference* above).
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [digestOnly, setDigestOnly] = useState(false);
@@ -114,6 +118,15 @@ export default function ProfilePage() {
     load();
   }, [supabase, router]);
 
+  // Reflect the real push-subscription state of this browser.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.getRegistration().then(async (reg) => {
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      setPushSubscribed(!!sub);
+    });
+  }, []);
+
   const handleSave = async () => {
     setSaving(true);
     setMessage("");
@@ -153,6 +166,7 @@ export default function ProfilePage() {
       return;
     }
 
+    setSubscribing(true);
     try {
       const registration = await navigator.serviceWorker.register("/sw.js");
       const subscription = await registration.pushManager.subscribe({
@@ -167,9 +181,12 @@ export default function ProfilePage() {
       });
 
       setPushEnabled(true);
+      setPushSubscribed(true);
       setMessage("Push notifications enabled!");
-    } catch (err) {
+    } catch {
       setMessage("Failed to enable push notifications");
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -206,7 +223,8 @@ export default function ProfilePage() {
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+            autoComplete="nickname"
+            className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
           />
         </div>
 
@@ -219,7 +237,8 @@ export default function ProfilePage() {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="+1234567890"
-            className="w-full border-2 border-navy p-3 font-body text-sm bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
+            autoComplete="tel"
+            className="w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold"
           />
         </div>
 
@@ -248,23 +267,31 @@ export default function ProfilePage() {
             NOTIFICATIONS
           </label>
           <div className="space-y-3">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={pushEnabled}
-                onChange={(e) => setPushEnabled(e.target.checked)}
-                className="w-4 h-4 accent-forest"
-              />
-              <span className="text-sm">Web Push</span>
-              {!pushEnabled && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pushEnabled}
+                  onChange={(e) => setPushEnabled(e.target.checked)}
+                  className="w-4 h-4 accent-forest"
+                />
+                <span className="text-sm">Web Push</span>
+              </label>
+              {pushSubscribed ? (
+                <span className="text-[0.6rem] font-display text-forest">
+                  ✓ ON THIS DEVICE
+                </span>
+              ) : (
                 <button
+                  type="button"
                   onClick={handleSubscribePush}
-                  className="text-[0.5rem] text-burnt-orange hover:underline"
+                  disabled={subscribing}
+                  className="retro-btn retro-btn-secondary text-[0.5rem] py-1.5 px-3 disabled:opacity-50"
                 >
-                  Enable
+                  {subscribing ? "Enabling…" : "Enable on this device"}
                 </button>
               )}
-            </label>
+            </div>
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"

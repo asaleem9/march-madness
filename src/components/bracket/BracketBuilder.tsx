@@ -148,6 +148,17 @@ export function BracketBuilder({
     }
   }, [searchParams]);
 
+  // Warn before losing unsaved picks on refresh/close/external navigation.
+  useEffect(() => {
+    if (!isDirty || !isEditable) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty, isEditable]);
+
   const teamMap = useMemo(() => buildTeamMap(games), [games]);
 
   const gameSlotInfos = useMemo(

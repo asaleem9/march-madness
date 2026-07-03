@@ -145,7 +145,8 @@ export function ChampionModal() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="your@email.com"
                   required
-                  className="flex-1 min-w-0 font-body text-xs bg-white border-2 border-navy/15 rounded px-3 py-2 text-navy placeholder:text-navy/40 focus:border-gold focus:outline-none"
+                  autoComplete="email"
+                  className="flex-1 min-w-0 font-body text-base bg-white border-2 border-navy/15 rounded px-3 py-2 text-navy placeholder:text-navy/40 focus:border-gold focus:outline-none"
                 />
                 <button
                   type="submit"

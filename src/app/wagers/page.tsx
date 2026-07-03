@@ -40,6 +40,7 @@ export default function WagersPage() {
   const [loading, setLoading] = useState(true);
   const [createError, setCreateError] = useState("");
   const [respondError, setRespondError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [wagerDeadline, setWagerDeadline] = useState<string | null>(null);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<string | null>(null);
@@ -104,36 +105,44 @@ export default function WagersPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!opponentId || !bracketId || !stakes) return;
+    if (!opponentId || !bracketId || !stakes || submitting) return;
     setCreateError("");
+    setSubmitting(true);
 
-    const response = await fetch("/api/wagers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        opponent_id: opponentId,
-        challenger_bracket_id: bracketId,
-        stakes,
-      }),
-    });
+    try {
+      const response = await fetch("/api/wagers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          opponent_id: opponentId,
+          challenger_bracket_id: bracketId,
+          stakes,
+        }),
+      });
 
-    if (response.ok) {
-      setShowCreate(false);
-      setStakes("");
-      // Reload wagers
-      const { data } = await supabase
-        .from("wagers")
-        .select(
-          "*, challenger:profiles!challenger_id(display_name), opponent:profiles!opponent_id(display_name)"
-        )
-        .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
-        .order("created_at", { ascending: false });
-      setWagers((data as Wager[]) || []);
-    } else {
-      const data = await response.json().catch(() => null);
-      setCreateError(data?.error || "Failed to create wager. Please try again.");
+      if (response.ok) {
+        setShowCreate(false);
+        setStakes("");
+        setOpponentId("");
+        // Reload wagers
+        const { data } = await supabase
+          .from("wagers")
+          .select(
+            "*, challenger:profiles!challenger_id(display_name), opponent:profiles!opponent_id(display_name)"
+          )
+          .or(`challenger_id.eq.${userId},opponent_id.eq.${userId}`)
+          .order("created_at", { ascending: false });
+        setWagers((data as Wager[]) || []);
+      } else {
+        const data = await response.json().catch(() => null);
+        setCreateError(data?.error || "Failed to create wager. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  const wagerClosed = !!wagerDeadline && new Date() > new Date(wagerDeadline);
 
   const handleRespond = async (wagerId: string, action: "accept" | "decline" | "revoke") => {
     setRespondingId(wagerId);
@@ -186,7 +195,9 @@ export default function WagersPage() {
         <h1 className="font-display text-navy text-sm">WAGERS</h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="retro-btn retro-btn-primary text-[0.5rem]"
+          disabled={wagerClosed && !showCreate}
+          className="retro-btn retro-btn-primary text-[0.6rem] disabled:opacity-50"
+          title={wagerClosed ? "The wager deadline has passed" : undefined}
         >
           {showCreate ? "Cancel" : "New Wager"}
         </button>
@@ -267,16 +278,21 @@ export default function WagersPage() {
               value={stakes}
               onChange={(e) => setStakes(e.target.value)}
               placeholder="Loser buys winner dinner"
-              className="w-full border-2 border-navy p-2 font-body text-sm bg-cream"
+              className="w-full border-2 border-navy p-2 font-body text-base bg-cream"
               required
             />
           </div>
+          {wagerClosed && (
+            <p className="text-burnt-orange text-xs">
+              The wager deadline has passed — new wagers are closed.
+            </p>
+          )}
           <button
             type="submit"
-            className="retro-btn retro-btn-secondary"
-            disabled={brackets.length === 0}
+            className="retro-btn retro-btn-secondary disabled:opacity-50"
+            disabled={brackets.length === 0 || submitting || wagerClosed}
           >
-            Send Challenge
+            {submitting ? "Sending…" : "Send Challenge"}
           </button>
         </form>
       )}
@@ -293,7 +309,7 @@ export default function WagersPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`font-display text-[0.5rem] px-4 py-2 border-2 border-navy rounded transition-colors ${
+            className={`font-display text-[0.6rem] px-4 py-2.5 border-2 border-navy rounded transition-colors ${
               activeTab === tab
                 ? "bg-navy text-gold"
                 : "bg-cream text-navy hover:bg-navy/10"
@@ -387,14 +403,14 @@ export default function WagersPage() {
                   <button
                     onClick={() => handleRespond(wager.id, "accept")}
                     disabled={respondingId === wager.id}
-                    className="retro-btn retro-btn-secondary text-[0.45rem] py-1.5 px-4 disabled:opacity-50"
+                    className="retro-btn retro-btn-secondary text-[0.55rem] py-2 px-4 disabled:opacity-50"
                   >
                     {respondingId === wager.id ? "..." : "Accept"}
                   </button>
                   <button
                     onClick={() => handleRespond(wager.id, "decline")}
                     disabled={respondingId === wager.id}
-                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream disabled:opacity-50"
+                    className="retro-btn text-[0.55rem] py-2 px-4 bg-cream disabled:opacity-50"
                   >
                     {respondingId === wager.id ? "..." : "Decline"}
                   </button>
@@ -405,7 +421,7 @@ export default function WagersPage() {
                   <button
                     onClick={() => setShowRevokeConfirm(wager.id)}
                     disabled={respondingId === wager.id}
-                    className="retro-btn text-[0.45rem] py-1.5 px-4 bg-cream text-burnt-orange border-burnt-orange disabled:opacity-50"
+                    className="retro-btn text-[0.55rem] py-2 px-4 bg-cream text-burnt-orange border-burnt-orange disabled:opacity-50"
                   >
                     Revoke
                   </button>
