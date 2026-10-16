@@ -1,11 +1,13 @@
 import { z } from "zod/v4";
 
-// Zod schemas for ESPN API response validation
+// Zod schemas for ESPN API response validation. Every field the cron doesn't
+// strictly need is optional so a partial ESPN payload still validates.
 const espnTeamSchema = z.object({
   id: z.string(),
   abbreviation: z.string(),
   displayName: z.string(),
   shortDisplayName: z.string(),
+  location: z.string().optional(),
   seed: z.string().optional(),
   logo: z.string().optional(),
 });
@@ -16,9 +18,21 @@ const espnCompetitorSchema = z.object({
   score: z.string().optional(),
   winner: z.boolean().optional(),
   seed: z.string().optional(),
+  homeAway: z.string().optional(),
+  curatedRank: z.object({ current: z.number().optional() }).optional(),
+  records: z
+    .array(
+      z.object({
+        type: z.string().optional(),
+        summary: z.string().optional(),
+      })
+    )
+    .optional(),
 });
 
 const espnStatusSchema = z.object({
+  displayClock: z.string().optional(),
+  period: z.number().optional(),
   type: z.object({
     id: z.string(),
     name: z.string(),
@@ -33,6 +47,14 @@ const espnCompetitionSchema = z.object({
   date: z.string(),
   competitors: z.array(espnCompetitorSchema),
   status: espnStatusSchema,
+  notes: z
+    .array(
+      z.object({
+        type: z.string().optional(),
+        headline: z.string().optional(),
+      })
+    )
+    .optional(),
 });
 
 const espnEventSchema = z.object({
@@ -49,6 +71,25 @@ const espnScoreboardSchema = z.object({
 
 export type ESPNScoreboard = z.infer<typeof espnScoreboardSchema>;
 export type ESPNEvent = z.infer<typeof espnEventSchema>;
+export type ESPNCompetition = ESPNEvent["competitions"][number];
+export type ESPNCompetitor = ESPNCompetition["competitors"][number];
+
+/** ESPN uses negative team ids for "TBD" placeholders (e.g. an undecided play-in side). */
+export const TBD_TEAM_IDS = new Set(["-1", "-2"]);
+
+export function isTbdCompetitor(c: Pick<ESPNCompetitor, "team">): boolean {
+  return TBD_TEAM_IDS.has(c.team.id) || c.team.id.startsWith("-");
+}
+
+/** Parse an ESPN scoreboard JSON payload (exported so tests can feed fixtures). */
+export function parseESPNScoreboard(data: unknown): ESPNScoreboard | null {
+  const parsed = espnScoreboardSchema.safeParse(data);
+  if (!parsed.success) {
+    console.error("ESPN response failed validation:", parsed.error);
+    return null;
+  }
+  return parsed.data;
+}
 
 export async function fetchESPNScoreboard(
   date: string
@@ -64,14 +105,7 @@ export async function fetchESPNScoreboard(
     }
 
     const data = await response.json();
-    const parsed = espnScoreboardSchema.safeParse(data);
-
-    if (!parsed.success) {
-      console.error("ESPN response failed validation:", parsed.error);
-      return null;
-    }
-
-    return parsed.data;
+    return parseESPNScoreboard(data);
   } catch (error) {
     console.error("Failed to fetch ESPN scoreboard:", error);
     return null;
@@ -96,4 +130,8 @@ export function formatDateForESPN(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}${month}${day}`;
+}
+
+export function espnGameUrl(espnGameId: string): string {
+  return `https://www.espn.com/mens-college-basketball/game/_/gameId/${espnGameId}`;
 }

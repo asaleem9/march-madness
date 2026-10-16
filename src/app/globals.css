@@ -12,8 +12,13 @@
   --color-forest: #16423c;
   --color-forest-light: #1e5a52;
 
-  --font-display: "Press Start 2P", monospace;
-  --font-body: "Space Mono", monospace;
+}
+
+/* Fonts are self-hosted through next/font (see layout.tsx), which sets these
+   variables on <html>. `inline` so utilities resolve the chain correctly. */
+@theme inline {
+  --font-display: var(--font-press-start), "Press Start 2P", monospace;
+  --font-body: var(--font-space-mono), "Space Mono", monospace;
 }
 
 /* Base styles */
@@ -56,6 +61,10 @@ body {
   z-index: 9999;
 }
 
+/* Component classes live in the `components` layer so Tailwind utilities
+   (which sit in the `utilities` layer) can override them per use — e.g.
+   `retro-card border-burnt-orange` or `retro-btn text-[0.6rem]`. */
+@layer components {
 /* Retro card style */
 .retro-card {
   background: white;
@@ -85,9 +94,11 @@ body {
   letter-spacing: 0.05em;
 }
 
-.retro-btn:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 6px 6px 0 var(--color-navy);
+@media (hover: hover) {
+  .retro-btn:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--color-navy);
+  }
 }
 
 .retro-btn:active {
@@ -190,6 +201,7 @@ body {
 
 .game-slot-team {
   padding: 0.4rem 0.5rem;
+  min-height: 44px; /* comfortable thumb target */
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -197,8 +209,10 @@ body {
   transition: background-color 0.15s;
 }
 
-.game-slot-team:hover {
-  background-color: var(--color-cream);
+@media (hover: hover) {
+  .game-slot-team:hover {
+    background-color: var(--color-cream);
+  }
 }
 
 .game-slot-team:focus-visible {
@@ -220,12 +234,76 @@ body {
 
 .game-slot-team.incorrect {
   background-color: var(--color-burnt-orange);
-  color: white;
-  opacity: 0.7;
+  color: var(--color-cream);
+}
+
+/* A pick whose team is no longer in this slot (eliminated earlier). */
+.game-slot-ghost {
+  padding: 0.25rem 0.5rem;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  color: var(--color-burnt-orange);
+  background: color-mix(in srgb, var(--color-burnt-orange) 8%, white);
+  border-top: 1px dashed var(--color-burnt-orange);
+  text-decoration: line-through;
 }
 
 .game-slot-divider {
   border-top: 1px solid var(--color-navy);
+}
+
+  /* Skip link for keyboard users: visually hidden until focused. */
+  .skip-link {
+    position: absolute;
+    left: 0.5rem;
+    top: -4rem;
+    z-index: 100;
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    background: var(--color-gold);
+    color: var(--color-navy);
+    padding: 0.75rem 1rem;
+    border: 3px solid var(--color-navy);
+    transition: top 0.15s;
+  }
+  .skip-link:focus {
+    top: 0.5rem;
+  }
+
+  /* Horizontal scroll affordance: fading edges on wide bracket rows. */
+  .scroll-fade {
+    mask-image: linear-gradient(to right, transparent, black 1.5rem, black calc(100% - 2.5rem), transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 1.5rem, black calc(100% - 2.5rem), transparent);
+  }
+  .scroll-fade.at-end {
+    mask-image: linear-gradient(to right, transparent, black 1.5rem);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 1.5rem);
+  }
+
+  /* Toasts */
+  .toast {
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    background: var(--color-navy);
+    color: var(--color-cream);
+    border: 2px solid var(--color-gold);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
+    animation: modal-in 0.2s ease-out;
+  }
+  .toast-success { border-color: #3fa86b; }
+  .toast-error { border-color: var(--color-burnt-orange); }
+
+  /* Flash a card whose data just changed (realtime). */
+  .flash-update {
+    animation: flash-update 1.2s ease-out;
+  }
+}
+
+@keyframes flash-update {
+  0% { box-shadow: 0 0 0 4px var(--color-gold); }
+  100% { box-shadow: 6px 6px 0 var(--color-navy); }
 }
 
 /* Basketball bounce animation */

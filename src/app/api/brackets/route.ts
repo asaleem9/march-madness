@@ -3,8 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeError } from "@/lib/sanitizeError";
 import type { SupabaseClient } from "@supabase/supabase-js";
-
-const REQUIRED_PICKS = 63;
+import { REQUIRED_PICKS } from "@/lib/tournament-structure";
+import { isPastDeadline as deadlinePassed } from "@/lib/tournament-config";
 
 // The bracket lock deadline is the real cutoff for any pick changes. Picks are
 // written with the admin client (to bypass the RLS deadline clause during the
@@ -17,8 +17,7 @@ async function isPastDeadline(supabase: SupabaseClient): Promise<boolean> {
     .eq("id", 1)
     .single();
 
-  if (!config?.bracket_lock_deadline) return false;
-  return new Date() > new Date(config.bracket_lock_deadline);
+  return deadlinePassed(config);
 }
 
 export async function POST(request: NextRequest) {

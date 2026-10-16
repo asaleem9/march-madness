@@ -1,14 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchESPNScoreboard, parseGameStatus, formatDateForESPN } from "@/lib/espn";
-import { getRoundPoints, isUpset } from "@/lib/utils";
+import {
+  fetchESPNScoreboard,
+  parseGameStatus,
+  formatDateForESPN,
+  isTbdCompetitor,
+} from "@/lib/espn";
+import { authorizeCronOrAdmin } from "@/lib/admin-auth";
+import { getScoringMultipliers } from "@/lib/tournament-config";
+import { processFinalGame, type FinalGameRow } from "@/lib/process-final-game";
+import { lockBracketsPastDeadline } from "@/lib/lock-brackets";
+import { awardAchievements } from "@/lib/achievements";
 
 export const maxDuration = 60;
 
+// Schedulers call GET; the admin page's "Run score update now" button POSTs.
 export async function GET(request: NextRequest) {
-  // Verify cron secret
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  return handleUpdateScores(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleUpdateScores(request);
+}
+
+async function handleUpdateScores(request: NextRequest) {
+  if (!(await authorizeCronOrAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -33,6 +49,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const { data: config } = await supabase
+    .from("tournament_config")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+  const multipliers = getScoringMultipliers(config);
+
   const allEvents = [
     ...(scoreboardTwoDaysAgo?.events || []),
     ...(scoreboardYesterday?.events || []),
@@ -42,6 +65,7 @@ export async function GET(request: NextRequest) {
   let gamesUpdated = 0;
   let scoresRecalculated = 0;
   let gamesDiscovered = 0;
+  let notificationsQueued = 0;
 
   for (const event of allEvents) {
     for (const competition of event.competitions) {
@@ -58,9 +82,10 @@ export async function GET(request: NextRequest) {
       // Auto-discover: if no match by espn_game_id, try matching by team ESPN IDs
       if (!game) {
         const competitors = competition.competitors;
-        const espnTeamIds = competitors.map((c) => c.team.id).filter((id) => id !== "-1" && id !== "-2");
+        const espnTeamIds = competitors
+          .filter((c) => !isTbdCompetitor(c))
+          .map((c) => c.team.id);
         if (espnTeamIds.length === 2) {
-          // Find our teams that match these ESPN IDs
           const { data: matchedTeams } = await supabase
             .from("teams")
             .select("id")
@@ -68,7 +93,6 @@ export async function GET(request: NextRequest) {
 
           if (matchedTeams && matchedTeams.length === 2) {
             const teamIds = matchedTeams.map((t) => t.id);
-            // Find a game with no espn_game_id that has both these teams
             const { data: candidates } = await supabase
               .from("games")
               .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
@@ -77,7 +101,6 @@ export async function GET(request: NextRequest) {
               .in("team_b_id", teamIds);
 
             if (candidates && candidates.length === 1) {
-              // Set the espn_game_id for future lookups
               await supabase
                 .from("games")
                 .update({ espn_game_id: espnGameId })
@@ -105,17 +128,11 @@ export async function GET(request: NextRequest) {
 
       let winnerId: number | null = null;
       if (status === "final") {
-        // Determine winner by matching ESPN team IDs
         const winnerCompetitor = competitors.find((c) => c.winner);
         if (winnerCompetitor) {
-          // Match by ESPN ID
-          if (
-            game.team_a?.espn_id === winnerCompetitor.team.id
-          ) {
+          if (game.team_a?.espn_id === winnerCompetitor.team.id) {
             winnerId = game.team_a_id;
-          } else if (
-            game.team_b?.espn_id === winnerCompetitor.team.id
-          ) {
+          } else if (game.team_b?.espn_id === winnerCompetitor.team.id) {
             winnerId = game.team_b_id;
           }
         }
@@ -133,6 +150,13 @@ export async function GET(request: NextRequest) {
       if (scoreA !== null) updates.score_a = scoreA;
       if (scoreB !== null) updates.score_b = scoreB;
       if (winnerId) updates.winner_id = winnerId;
+      if (status === "in_progress") {
+        updates.clock = competition.status.displayClock ?? null;
+        updates.period = competition.status.period ?? null;
+      } else if (status === "final") {
+        updates.clock = null;
+        updates.period = null;
+      }
 
       const { error } = await supabase
         .from("games")
@@ -141,166 +165,64 @@ export async function GET(request: NextRequest) {
 
       if (!error) gamesUpdated++;
 
-      // If game is final with a winner, process results.
-      // Always advance winner and fix eliminations (idempotent).
-      // Score picks and notify when the winner first becomes known — which
-      // covers games ESPN marked final before it set the winner flag, not just
-      // the status transition.
+      // Once a winner is known, run the (idempotent) post-final pipeline every
+      // cycle so missed advancements self-heal. Notify only when the winner
+      // first becomes known — which also covers games ESPN marks final before
+      // it sets the winner flag.
       const winnerNewlyKnown = !!winnerId && winnerId !== game.winner_id;
       if (status === "final" && winnerId) {
-        // Mark losing team as eliminated
-        const loserId =
-          winnerId === game.team_a_id ? game.team_b_id : game.team_a_id;
-        if (loserId) {
-          await supabase
-            .from("teams")
-            .update({ eliminated: true })
-            .eq("id", loserId);
-        }
-
-        // Advance winner to next game
-        if (game.next_game_slot) {
-          const updateField =
-            game.slot_position === "top" ? "team_a_id" : "team_b_id";
-          await supabase
-            .from("games")
-            .update({ [updateField]: winnerId })
-            .eq("game_slot", game.next_game_slot);
-
-          // For First Four games: update any First Round picks that used
-          // the convention team_a pick to point to the actual winner.
-          // Users pick "TEX / NCST" as a unit; we store team_a's ID by
-          // convention. If team_b won, swap picks to the real winner so
-          // standard scoring (picked_team_id === winner_id) works.
-          if (game.round === "first_four" && loserId) {
-            await supabase
-              .from("bracket_picks")
-              .update({ picked_team_id: winnerId })
-              .eq("game_slot", game.next_game_slot)
-              .eq("picked_team_id", loserId);
-          }
-        }
-
-        // Score picks and notify only when the winner first becomes known
-        if (winnerNewlyKnown) {
-          // Update bracket picks for this game
-          const { data: picks } = await supabase
-            .from("bracket_picks")
-            .select("*, brackets!inner(user_id)")
-            .eq("game_slot", game.game_slot);
-
-          if (picks) {
-            for (const pick of picks) {
-              const correct = pick.picked_team_id === winnerId;
-              let points = 0;
-
-              if (correct) {
-                const basePoints = getRoundPoints(game.round);
-                // Check if upset
-                const winnerTeam =
-                  winnerId === game.team_a_id ? game.team_a : game.team_b;
-                const loserTeam =
-                  winnerId === game.team_a_id ? game.team_b : game.team_a;
-
-                if (
-                  winnerTeam &&
-                  loserTeam &&
-                  isUpset(winnerTeam.seed, loserTeam.seed)
-                ) {
-                  points = Math.round(basePoints * 1.5);
-                } else {
-                  points = basePoints;
-                }
-              }
-
-              await supabase
-                .from("bracket_picks")
-                .update({ is_correct: correct, points_earned: points })
-                .eq("id", pick.id);
-            }
-          }
-
-          // Recalculate bracket scores
-          const { data: allPicks } = await supabase
-            .from("bracket_picks")
-            .select("bracket_id, points_earned")
-            .not("is_correct", "is", null);
-
-          if (allPicks) {
-            const scoresByBracket = new Map<string, number>();
-            for (const pick of allPicks) {
-              const current = scoresByBracket.get(pick.bracket_id) || 0;
-              scoresByBracket.set(
-                pick.bracket_id,
-                current + (pick.points_earned || 0)
-              );
-            }
-
-            for (const [bracketId, score] of scoresByBracket) {
-              await supabase
-                .from("brackets")
-                .update({ score })
-                .eq("id", bracketId);
-              scoresRecalculated++;
-            }
-          }
-
-          // Queue notifications for affected users
-          if (picks) {
-            const userIds = [
-              ...new Set(
-                picks.map(
-                  (p) => (p.brackets as unknown as { user_id: string }).user_id
-                )
-              ),
-            ];
-            const notifications = userIds.map((uid) => ({
-              user_id: uid,
-              type: "game_result" as const,
-              payload: {
-                game_id: game.id,
-                team_a: game.team_a?.name,
-                team_b: game.team_b?.name,
-                winner:
-                  winnerId === game.team_a_id
-                    ? game.team_a?.name
-                    : game.team_b?.name,
-                score: `${scoreA}-${scoreB}`,
-              },
-              batch_key: `${today}-${new Date().getHours() < 18 ? "afternoon" : "evening"}`,
-            }));
-
-            await supabase.from("notification_queue").insert(notifications);
-          }
-        }
+        const result = await processFinalGame(supabase, {
+          game: game as unknown as FinalGameRow,
+          winnerId,
+          scoreA,
+          scoreB,
+          multipliers,
+          notify: winnerNewlyKnown,
+          batchKey: `${today}-${now.getUTCHours() < 18 ? "afternoon" : "evening"}`,
+        });
+        scoresRecalculated += result.bracketsRecalculated;
+        notificationsQueued += result.notificationsQueued;
       }
     }
   }
 
-  // Once the tournament is over, settle any accepted wagers.
+  // Past the lock deadline, finalize complete drafts so they count.
+  const lock = await lockBracketsPastDeadline(supabase, now);
+
+  // Once the tournament is over, settle any accepted wagers and hand out badges.
   const wagersResolved = await resolveCompletedWagers(supabase);
+  const achievementsAwarded = await awardAchievements(supabase);
+
+  await supabase
+    .from("tournament_config")
+    .update({ last_score_update_at: now.toISOString() })
+    .eq("id", 1);
 
   return NextResponse.json({
     message: "Scores updated",
     gamesUpdated,
     gamesDiscovered,
     scoresRecalculated,
+    notificationsQueued,
+    bracketsLocked: lock.locked,
+    incompleteDrafts: lock.incomplete,
     wagersResolved,
-    timestamp: new Date().toISOString(),
+    achievementsAwarded,
+    timestamp: now.toISOString(),
   });
 }
 
 // Resolve accepted wagers by comparing final bracket scores. Runs only after
-// the championship (slot 67) is final; idempotent because it only touches
-// wagers still in the "accepted" state.
+// the championship is final; idempotent because it only touches wagers still
+// in the "accepted" state.
 async function resolveCompletedWagers(
   supabase: ReturnType<typeof createAdminClient>
 ): Promise<number> {
   const { data: champ } = await supabase
     .from("games")
     .select("status, winner_id")
-    .eq("game_slot", 67)
-    .single();
+    .eq("round", "championship")
+    .maybeSingle();
 
   if (!champ || champ.status !== "final" || !champ.winner_id) return 0;
 
@@ -360,6 +282,10 @@ async function resolveCompletedWagers(
         type: "wager_result" as const,
         payload: {
           wager_id: wager.id,
+          stakes: wager.stakes,
+          opponent_id: wager.opponent_id,
+          your_score: challengerScore,
+          their_score: opponentScore,
           won: winnerId === wager.challenger_id,
           tie: winnerId === null,
         },
@@ -369,6 +295,10 @@ async function resolveCompletedWagers(
         type: "wager_result" as const,
         payload: {
           wager_id: wager.id,
+          stakes: wager.stakes,
+          opponent_id: wager.challenger_id,
+          your_score: opponentScore,
+          their_score: challengerScore,
           won: winnerId === wager.opponent_id,
           tie: winnerId === null,
         },

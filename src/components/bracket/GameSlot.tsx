@@ -119,7 +119,7 @@ function TeamRow({
     );
   }
 
-  const probability = getWinProbability(team.name);
+  const probability = getWinProbability(team);
   const oddsStr = formatOdds(probability);
 
   const teamClass = cn(

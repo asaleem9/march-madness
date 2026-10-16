@@ -68,7 +68,7 @@ export interface Team {
   abbreviation: string;
   seed: number;
   region: Region;
-  record: string;
+  record: string | null;
   logoUrl: string | null;
   eliminated: boolean;
   espnId: string | null;

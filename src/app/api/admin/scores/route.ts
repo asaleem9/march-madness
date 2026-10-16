@@ -1,39 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getRoundPoints, isUpset } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin-auth";
 import { sanitizeError } from "@/lib/sanitizeError";
+import { getScoringMultipliers } from "@/lib/tournament-config";
+import { processFinalGame, type FinalGameRow } from "@/lib/process-final-game";
 
-const adminEmails = (process.env.ADMIN_EMAILS || "")
-  .split(",")
-  .map((e) => e.trim())
-  .filter(Boolean);
-
-async function isAdmin(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user && adminEmails.includes(user.email || "");
-}
-
+/**
+ * Manual score entry (fallback when ESPN is down or wrong). Runs the same
+ * post-final pipeline as the cron, so advancement, scoring, notifications and
+ * wager resolution all behave identically. Re-submitting a final game
+ * re-scores it idempotently.
+ */
 export async function POST(request: NextRequest) {
-  if (!(await isAdmin(request))) {
+  if (!(await isAdminUser())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const adminClient = createAdminClient();
   const body = await request.json();
-  const { game_id, score_a, score_b, winner_id, status } = body;
+  const { game_id, score_a, score_b, status } = body;
+  let { winner_id } = body as { winner_id?: number | null };
 
-  // Update game
+  if (!game_id) {
+    return NextResponse.json({ error: "game_id is required" }, { status: 400 });
+  }
+
+  const finalStatus = status || "final";
+  const { data: existing } = await adminClient
+    .from("games")
+    .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
+    .eq("id", game_id)
+    .single();
+
+  if (!existing) {
+    return NextResponse.json({ error: "Game not found" }, { status: 404 });
+  }
+
+  // Derive the winner from the scores when the admin didn't choose one.
+  if (finalStatus === "final" && !winner_id && score_a != null && score_b != null) {
+    if (score_a > score_b) winner_id = existing.team_a_id;
+    else if (score_b > score_a) winner_id = existing.team_b_id;
+  }
+  if (finalStatus === "final" && winner_id && score_a != null && score_b != null) {
+    const scoreSaysA = score_a > score_b;
+    if ((scoreSaysA && winner_id !== existing.team_a_id) || (!scoreSaysA && score_a !== score_b && winner_id !== existing.team_b_id)) {
+      return NextResponse.json(
+        { error: "Winner contradicts the scores" },
+        { status: 400 }
+      );
+    }
+  }
+
   const { error } = await adminClient
     .from("games")
     .update({
       score_a,
       score_b,
-      winner_id,
-      status: status || "final",
+      winner_id: finalStatus === "final" ? winner_id ?? null : null,
+      status: finalStatus,
+      clock: null,
+      period: null,
     })
     .eq("id", game_id);
 
@@ -41,91 +67,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
   }
 
-  // If final, process results (same logic as cron)
-  if ((status || "final") === "final" && winner_id) {
-    const { data: game } = await adminClient
-      .from("games")
-      .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
-      .eq("id", game_id)
-      .single();
+  if (finalStatus === "final" && winner_id) {
+    const { data: config } = await adminClient
+      .from("tournament_config")
+      .select("scoring_multipliers")
+      .eq("id", 1)
+      .maybeSingle();
 
-    if (game) {
-      // Mark loser as eliminated
-      const loserId =
-        winner_id === game.team_a_id ? game.team_b_id : game.team_a_id;
-      if (loserId) {
-        await adminClient
-          .from("teams")
-          .update({ eliminated: true })
-          .eq("id", loserId);
-      }
-
-      // Advance winner
-      if (game.next_game_slot) {
-        const updateField =
-          game.slot_position === "top" ? "team_a_id" : "team_b_id";
-        await adminClient
-          .from("games")
-          .update({ [updateField]: winner_id })
-          .eq("game_slot", game.next_game_slot);
-      }
-
-      // Update bracket picks
-      const { data: picks } = await adminClient
-        .from("bracket_picks")
-        .select("*")
-        .eq("game_slot", game.game_slot);
-
-      if (picks) {
-        for (const pick of picks) {
-          const correct = pick.picked_team_id === winner_id;
-          let points = 0;
-          if (correct) {
-            const basePoints = getRoundPoints(game.round);
-            const winnerTeam =
-              winner_id === game.team_a_id ? game.team_a : game.team_b;
-            const loserTeam =
-              winner_id === game.team_a_id ? game.team_b : game.team_a;
-            if (
-              winnerTeam &&
-              loserTeam &&
-              isUpset(winnerTeam.seed, loserTeam.seed)
-            ) {
-              points = Math.round(basePoints * 1.5);
-            } else {
-              points = basePoints;
-            }
-          }
-          await adminClient
-            .from("bracket_picks")
-            .update({ is_correct: correct, points_earned: points })
-            .eq("id", pick.id);
-        }
-      }
-
-      // Recalculate all bracket scores
-      const { data: allPicks } = await adminClient
-        .from("bracket_picks")
-        .select("bracket_id, points_earned")
-        .not("is_correct", "is", null);
-
-      if (allPicks) {
-        const scoresByBracket = new Map<string, number>();
-        for (const pick of allPicks) {
-          const current = scoresByBracket.get(pick.bracket_id) || 0;
-          scoresByBracket.set(
-            pick.bracket_id,
-            current + (pick.points_earned || 0)
-          );
-        }
-        for (const [bracketId, score] of scoresByBracket) {
-          await adminClient
-            .from("brackets")
-            .update({ score })
-            .eq("id", bracketId);
-        }
-      }
-    }
+    const result = await processFinalGame(adminClient, {
+      game: existing as unknown as FinalGameRow,
+      winnerId: winner_id,
+      scoreA: score_a ?? null,
+      scoreB: score_b ?? null,
+      multipliers: getScoringMultipliers(config),
+      notify: existing.winner_id !== winner_id,
+      batchKey: `manual-${new Date().toISOString().slice(0, 10)}`,
+    });
+    return NextResponse.json({ success: true, ...result });
   }
 
   return NextResponse.json({ success: true });

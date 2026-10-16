@@ -236,3 +236,95 @@ export function mockPicks(count: number): { game_slot: number; round: string; pi
 export function resetFixtures() {
   teamIdCounter = 1;
 }
+
+// ─── Recording Supabase Mock ────────────────────────────────────────────
+// A Proxy-based query builder that accepts ANY chain (.select().eq().in()
+// .order().maybeSingle()...), records every call, and resolves with whatever
+// the resolver returns for that table + chain. Use it for code whose exact
+// query shape you don't want tests coupled to.
+
+export interface RecordedCall {
+  table: string;
+  method: string;
+  args: unknown[];
+}
+
+export type RecordingResolver = (
+  table: string,
+  chain: RecordedCall[]
+) => unknown;
+
+export function createRecordingClient(
+  resolver: RecordingResolver | Record<string, unknown> = {}
+) {
+  const calls: RecordedCall[] = [];
+  const resolve: RecordingResolver =
+    typeof resolver === "function"
+      ? resolver
+      : (table) => (resolver as Record<string, unknown>)[table] ?? null;
+
+  function chain(table: string) {
+    const local: RecordedCall[] = [];
+    const proxy: unknown = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") {
+            return (
+              onFulfilled: (v: unknown) => unknown,
+              onRejected?: (e: unknown) => unknown
+            ) => {
+              let data: unknown;
+              try {
+                data = resolve(table, local);
+              } catch (e) {
+                return Promise.reject(e).then(onFulfilled, onRejected);
+              }
+              const wantsOne = local.some(
+                (c) => c.method === "single" || c.method === "maybeSingle"
+              );
+              if (wantsOne && Array.isArray(data)) data = data[0] ?? null;
+              const result = {
+                data,
+                error: null,
+                count: Array.isArray(data) ? data.length : null,
+              };
+              return Promise.resolve(result).then(onFulfilled, onRejected);
+            };
+          }
+          if (prop === "catch" || prop === "finally") return undefined;
+          return (...args: unknown[]) => {
+            const call = { table, method: String(prop), args };
+            calls.push(call);
+            local.push(call);
+            return proxy;
+          };
+        },
+      }
+    );
+    return proxy;
+  }
+
+  const client = {
+    from: vi.fn((table: string) => chain(table)),
+    auth: {
+      getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    },
+    calls,
+    /** Calls for one table+method, e.g. updates("brackets") */
+    updates: (table: string) => calls.filter((c) => c.table === table && c.method === "update"),
+    inserts: (table: string) => calls.filter((c) => c.table === table && c.method === "insert"),
+    upserts: (table: string) => calls.filter((c) => c.table === table && c.method === "upsert"),
+    /** The filter args that followed a given recorded call (e.g. the .eq() after an .update()) */
+    filtersAfter: (call: RecordedCall) => {
+      const i = calls.indexOf(call);
+      const out: RecordedCall[] = [];
+      for (let j = i + 1; j < calls.length && calls[j].table === call.table; j++) {
+        if (["update", "insert", "upsert", "delete", "select"].includes(calls[j].method)) break;
+        out.push(calls[j]);
+      }
+      return out;
+    },
+  };
+  return client;
+}

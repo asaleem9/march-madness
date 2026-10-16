@@ -28,6 +28,7 @@ vi.mock("@/lib/supabase/admin", () => ({
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               single: mockAdminSelect,
+              maybeSingle: mockAdminSelect,
             })),
           })),
           update: vi.fn(() => ({

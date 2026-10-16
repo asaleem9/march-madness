@@ -89,6 +89,16 @@ export async function sendSMS(
   }
 }
 
+/** Verified Resend sender. Set EMAIL_FROM in the environment, e.g. "March Madness <brackets@example.com>". */
+export function getEmailFrom(): string {
+  const from = process.env.EMAIL_FROM;
+  if (!from) {
+    console.warn("EMAIL_FROM is not set; email sends will be rejected by Resend");
+    return "March Madness <brackets@yourdomain.com>";
+  }
+  return from;
+}
+
 export async function sendEmail(
   to: string,
   subject: string,
@@ -107,7 +117,7 @@ export async function sendEmail(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: "March Madness <brackets@yourdomain.com>",
+        from: getEmailFrom(),
         to,
         subject,
         text: body,

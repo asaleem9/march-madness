@@ -161,7 +161,7 @@ describe("ROUND_DISPLAY_NAMES", () => {
   });
 
   it("has correct display names", () => {
-    expect(ROUND_DISPLAY_NAMES.first_four).toBe("First Four");
+    expect(ROUND_DISPLAY_NAMES.first_four).toBe("Opening Round");
     expect(ROUND_DISPLAY_NAMES.championship).toBe("Championship");
     expect(ROUND_DISPLAY_NAMES.sweet_16).toBe("Sweet 16");
   });

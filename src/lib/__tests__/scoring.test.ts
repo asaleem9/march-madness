@@ -3,6 +3,7 @@ import {
   calculatePickPoints,
   calculateBracketScore,
   buildLeaderboard,
+  maxPossiblePoints,
 } from "../scoring";
 import type { ScoringMultipliers } from "@/types";
 
@@ -305,5 +306,26 @@ describe("buildLeaderboard", () => {
       score: 100,
       rank: 1,
     });
+  });
+});
+
+describe("maxPossiblePoints", () => {
+  const games = [
+    { gameSlot: 13, round: "first_round" as const, status: "final" as const, winnerId: 1 },
+    { gameSlot: 14, round: "first_round" as const, status: "final" as const, winnerId: 4 },
+    { gameSlot: 45, round: "second_round" as const, status: "scheduled" as const, winnerId: null },
+    { gameSlot: 75, round: "championship" as const, status: "scheduled" as const, winnerId: null },
+  ];
+  it("adds earned points plus base points for live picks only", () => {
+    const picks = [
+      { gameSlot: 13, pickedTeamId: 1, pointsEarned: 10, isCorrect: true },
+      { gameSlot: 14, pickedTeamId: 3, pointsEarned: 0, isCorrect: false },
+      { gameSlot: 45, pickedTeamId: 1, pointsEarned: null, isCorrect: null }, // alive
+      { gameSlot: 75, pickedTeamId: 3, pointsEarned: null, isCorrect: null }, // eliminated
+    ];
+    expect(maxPossiblePoints(picks, games, new Set([3]))).toBe(10 + 20);
+  });
+  it("ignores picks for unknown games", () => {
+    expect(maxPossiblePoints([{ gameSlot: 999, pickedTeamId: 1, pointsEarned: null, isCorrect: null }], games, new Set())).toBe(0);
   });
 });

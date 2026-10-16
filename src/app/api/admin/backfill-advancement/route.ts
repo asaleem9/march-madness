@@ -8,31 +8,16 @@ import {
   type ESPNEvent,
 } from "@/lib/espn";
 import { getRoundPoints, isUpset } from "@/lib/utils";
+import { authorizeCronOrAdmin } from "@/lib/admin-auth";
+import { getScoringMultipliers } from "@/lib/tournament-config";
+import { processFinalGame, type FinalGameRow } from "@/lib/process-final-game";
 
 type ESPNCompetition = ESPNEvent["competitions"][number];
 
 export const maxDuration = 300;
 
-const adminEmails = (process.env.ADMIN_EMAILS || "")
-  .split(",")
-  .map((e) => e.trim())
-  .filter(Boolean);
-
-async function isAdmin() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user && adminEmails.includes(user.email || "");
-}
-
 async function authorize(request: NextRequest): Promise<boolean> {
-  // Accept either admin session cookie or CRON_SECRET bearer token
-  const authHeader = request.headers.get("authorization");
-  if (authHeader === `Bearer ${process.env.CRON_SECRET}`) {
-    return true;
-  }
-  return !!(await isAdmin());
+  return authorizeCronOrAdmin(request);
 }
 
 export async function GET(request: NextRequest) {
@@ -63,7 +48,6 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleBackfill() {
-
   const adminClient = createAdminClient();
 
   // Fetch all final games with winners, ordered by game_slot so earlier rounds process first
@@ -82,132 +66,38 @@ async function handleBackfill() {
     return NextResponse.json({ message: "No final games found", fixed: 0 });
   }
 
-  let advancementsFixed = 0;
-  let eliminationsFixed = 0;
+  const { data: config } = await adminClient
+    .from("tournament_config")
+    .select("scoring_multipliers")
+    .eq("id", 1)
+    .maybeSingle();
+  const multipliers = getScoringMultipliers(config);
+
   let picksScored = 0;
+  let bracketsRecalculated = 0;
   const details: string[] = [];
 
+  // The shared pipeline is idempotent: eliminations, advancements, play-in pick
+  // swaps and scoring are all re-applied, and only changed rows are written.
   for (const game of finalGames) {
-    const winnerId = game.winner_id;
-
-    // Fix elimination: mark loser as eliminated
-    const loserId = winnerId === game.team_a_id ? game.team_b_id : game.team_a_id;
-    if (loserId) {
-      const { data: loserTeam } = await adminClient
-        .from("teams")
-        .select("eliminated, name")
-        .eq("id", loserId)
-        .single();
-
-      if (loserTeam && !loserTeam.eliminated) {
-        await adminClient
-          .from("teams")
-          .update({ eliminated: true })
-          .eq("id", loserId);
-        eliminationsFixed++;
-        details.push(`Eliminated: ${loserTeam.name}`);
-      }
-    }
-
-    // Fix advancement: place winner in next game slot
-    if (game.next_game_slot) {
-      const updateField = game.slot_position === "top" ? "team_a_id" : "team_b_id";
-
-      // Check if the next game slot already has the correct team
-      const { data: nextGame } = await adminClient
-        .from("games")
-        .select("team_a_id, team_b_id, game_slot")
-        .eq("game_slot", game.next_game_slot)
-        .single();
-
-      if (nextGame) {
-        const currentValue = updateField === "team_a_id" ? nextGame.team_a_id : nextGame.team_b_id;
-        if (currentValue !== winnerId) {
-          await adminClient
-            .from("games")
-            .update({ [updateField]: winnerId })
-            .eq("game_slot", game.next_game_slot);
-          advancementsFixed++;
-
-          const winnerTeam = winnerId === game.team_a_id ? game.team_a : game.team_b;
-          details.push(
-            `Advanced: ${winnerTeam?.name || winnerId} → slot ${game.next_game_slot} (${updateField})`
-          );
-        }
-      }
-    }
-
-    // Fix First Four pick swaps
-    if (game.round === "first_four" && loserId) {
-      const { count } = await adminClient
-        .from("bracket_picks")
-        .update({ picked_team_id: winnerId })
-        .eq("game_slot", game.next_game_slot)
-        .eq("picked_team_id", loserId);
-
-      if (count && count > 0) {
-        details.push(`Swapped ${count} First Four picks for slot ${game.next_game_slot}`);
-      }
-    }
-
-    // Fix bracket pick scoring — rescore ALL picks (not just unscored) to fix wrong point values
-    const { data: picks } = await adminClient
-      .from("bracket_picks")
-      .select("*")
-      .eq("game_slot", game.game_slot);
-
-    if (picks && picks.length > 0) {
-      for (const pick of picks) {
-        const correct = pick.picked_team_id === winnerId;
-        let points = 0;
-        if (correct) {
-          const basePoints = getRoundPoints(game.round);
-          const winnerTeam = winnerId === game.team_a_id ? game.team_a : game.team_b;
-          const loserTeam = winnerId === game.team_a_id ? game.team_b : game.team_a;
-          if (winnerTeam && loserTeam && isUpset(winnerTeam.seed, loserTeam.seed)) {
-            points = Math.round(basePoints * 1.5);
-          } else {
-            points = basePoints;
-          }
-        }
-        if (pick.is_correct !== correct || pick.points_earned !== points) {
-          await adminClient
-            .from("bracket_picks")
-            .update({ is_correct: correct, points_earned: points })
-            .eq("id", pick.id);
-          picksScored++;
-        }
-      }
-    }
-  }
-
-  // Recalculate all bracket scores
-  const { data: allPicks } = await adminClient
-    .from("bracket_picks")
-    .select("bracket_id, points_earned")
-    .not("is_correct", "is", null);
-
-  let bracketsRecalculated = 0;
-  if (allPicks) {
-    const scoresByBracket = new Map<string, number>();
-    for (const pick of allPicks) {
-      const current = scoresByBracket.get(pick.bracket_id) || 0;
-      scoresByBracket.set(pick.bracket_id, current + (pick.points_earned || 0));
-    }
-    for (const [bracketId, score] of scoresByBracket) {
-      await adminClient
-        .from("brackets")
-        .update({ score })
-        .eq("id", bracketId);
-      bracketsRecalculated++;
+    const result = await processFinalGame(adminClient, {
+      game: game as unknown as FinalGameRow,
+      winnerId: game.winner_id,
+      scoreA: game.score_a,
+      scoreB: game.score_b,
+      multipliers,
+      notify: false,
+    });
+    picksScored += result.picksScored;
+    bracketsRecalculated = result.bracketsRecalculated;
+    if (result.picksScored > 0) {
+      details.push(`Slot ${game.game_slot}: re-scored ${result.picksScored} picks`);
     }
   }
 
   return NextResponse.json({
     message: "Backfill complete",
     gamesProcessed: finalGames.length,
-    advancementsFixed,
-    eliminationsFixed,
     picksScored,
     bracketsRecalculated,
     details,
@@ -221,23 +111,16 @@ async function handleFullSync() {
   let gamesMatched = 0;
   let gamesUpdated = 0;
 
-  // Fix known ESPN ID mismatches
-  const espnIdFixes: Record<string, string> = {
-    "2306": "338", // Kennesaw St.
-  };
-  for (const [oldId, newId] of Object.entries(espnIdFixes)) {
-    const { count } = await adminClient
-      .from("teams")
-      .update({ espn_id: newId })
-      .eq("espn_id", oldId);
-    if (count && count > 0) {
-      details.push(`Fixed ESPN ID: ${oldId} → ${newId}`);
-    }
+  // Scan every day of the tournament, derived from the scheduled games.
+  const [{ data: firstGame }, { data: lastGame }] = await Promise.all([
+    adminClient.from("games").select("scheduled_at").not("scheduled_at", "is", null).order("scheduled_at", { ascending: true }).limit(1).maybeSingle(),
+    adminClient.from("games").select("scheduled_at").not("scheduled_at", "is", null).order("scheduled_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (!firstGame?.scheduled_at || !lastGame?.scheduled_at) {
+    return NextResponse.json({ error: "No scheduled games to sync" }, { status: 400 });
   }
-
-  // Scan every day of the tournament (March 17 – April 7, 2026)
-  const startDate = new Date("2026-03-17");
-  const endDate = new Date("2026-04-08");
+  const startDate = new Date(new Date(firstGame.scheduled_at).getTime() - 24 * 60 * 60 * 1000);
+  const endDate = new Date(new Date(lastGame.scheduled_at).getTime() + 24 * 60 * 60 * 1000);
   const dates: string[] = [];
   for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
     dates.push(formatDateForESPN(d));

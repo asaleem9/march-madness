@@ -43,3 +43,10 @@ CLAUDE.md
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local leftovers (screenshots, raw assets, browser automation logs)
+.playwright-mcp/
+/*.png
+/images/
+*.bak
+/ALI_VS_ITSWETTER.md

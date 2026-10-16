@@ -75,7 +75,7 @@ export function safeRedirectPath(
 }
 
 export const ROUND_DISPLAY_NAMES: Record<Round, string> = {
-  first_four: "First Four",
+  first_four: "Opening Round",
   first_round: "First Round",
   second_round: "Second Round",
   sweet_16: "Sweet 16",

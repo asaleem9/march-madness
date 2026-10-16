@@ -1,0 +1,28 @@
+name: Tournament cron
+
+# Vercel Hobby only allows daily crons, so during the tournament window this
+# workflow hits the score and notification endpoints every 5 minutes. The
+# schedule only matches Mar 16 – Apr 6; the rest of the year nothing fires.
+# Requires the CRON_SECRET repository secret (Settings → Secrets → Actions).
+# GitHub disables scheduled workflows after 60 days without a commit; a push
+# (or Actions → this workflow → "Enable workflow") turns them back on.
+on:
+  schedule:
+    - cron: "*/5 * 16-31 3 *"
+    - cron: "*/5 * 1-6 4 *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update scores
+        run: |
+          curl -fsS --retry 2 --max-time 70 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://bracketmadness.vercel.app/api/cron/update-scores
+      - name: Send notifications
+        run: |
+          curl -fsS --retry 2 --max-time 70 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://bracketmadness.vercel.app/api/notifications/send-batch

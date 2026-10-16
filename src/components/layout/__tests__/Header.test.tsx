@@ -65,13 +65,15 @@ describe("Header", () => {
 
     expect(screen.queryByText("Sign Out")).not.toBeInTheDocument();
     expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
+    // Public pages stay reachable when logged out.
+    expect(screen.getByText("Leaderboard")).toBeInTheDocument();
   });
 
   it("shows nav links and Sign Out when authenticated", async () => {
     mockUser = { id: "user-1", email: "test@example.com" };
 
     await act(async () => {
-      render(<Header />);
+      render(<Header initialUser={mockUser as never} />);
     });
 
     await waitFor(() => {
@@ -98,15 +100,20 @@ describe("Header", () => {
     });
 
     await act(async () => {
-      render(<Header />);
+      render(<Header initialUser={mockUser as never} />);
     });
 
     await waitFor(() => {
       expect(screen.getByText("Sign Out")).toBeInTheDocument();
     });
 
+    // Signing out asks for confirmation first so a stray tap can't log you out.
     await act(async () => {
       fireEvent.click(screen.getByText("Sign Out"));
+    });
+    expect(mockSignOut).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByText("Yes"));
     });
 
     expect(mockSignOut).toHaveBeenCalled();

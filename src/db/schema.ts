@@ -9,6 +9,7 @@ import {
   jsonb,
   unique,
   index,
+  uniqueIndex,
   pgEnum,
 } from "drizzle-orm/pg-core";
 
@@ -97,16 +98,22 @@ export const profiles = pgTable("profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
-export const pushSubscriptions = pgTable("push_subscriptions", {
-  id: serial("id").primaryKey(),
-  userId: uuid("user_id")
-    .references(() => profiles.id)
-    .unique()
-    .notNull(),
-  endpoint: text("endpoint").notNull(),
-  keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: serial("id").primaryKey(),
+    userId: uuid("user_id")
+      .references(() => profiles.id)
+      .notNull(),
+    endpoint: text("endpoint").notNull(),
+    keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("push_subscriptions_endpoint_key").on(table.endpoint),
+    index("push_subscriptions_user_id_idx").on(table.userId),
+  ]
+);
 
 export const teams = pgTable(
   "teams",
@@ -121,7 +128,10 @@ export const teams = pgTable(
     eliminated: boolean("eliminated").default(false),
     espnId: text("espn_id"),
   },
-  (table) => [index("teams_region_seed_idx").on(table.region, table.seed)]
+  (table) => [
+    index("teams_region_seed_idx").on(table.region, table.seed),
+    uniqueIndex("teams_espn_id_unique").on(table.espnId),
+  ]
 );
 
 export const games = pgTable(
@@ -141,6 +151,8 @@ export const games = pgTable(
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     status: gameStatusEnum("status").default("scheduled").notNull(),
     espnGameId: text("espn_game_id"),
+    clock: text("clock"),
+    period: integer("period"),
   },
   (table) => [
     index("games_status_idx").on(table.status),
@@ -162,7 +174,10 @@ export const brackets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("brackets_user_id_idx").on(table.userId)]
+  (table) => [
+    index("brackets_user_id_idx").on(table.userId),
+    uniqueIndex("brackets_one_per_user").on(table.userId),
+  ]
 );
 
 export const bracketPicks = pgTable(
@@ -243,6 +258,7 @@ export const notificationQueue = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     sent: boolean("sent").default(false),
     batchKey: text("batch_key"),
+    attempts: integer("attempts").notNull().default(0),
   },
   (table) => [
     index("notification_queue_user_sent_batch_idx").on(
@@ -296,6 +312,10 @@ export const tournamentConfig = pgTable("tournament_config", {
       championship: 320,
     }),
   activePhase: tournamentPhaseEnum("active_phase").default("pre_tournament"),
+  finalFourPairing: jsonb("final_four_pairing").$type<
+    [[string, string], [string, string]]
+  >(),
+  lastScoreUpdateAt: timestamp("last_score_update_at", { withTimezone: true }),
 });
 
 export const emailWaitlist = pgTable("email_waitlist", {

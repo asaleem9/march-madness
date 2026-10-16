@@ -9,19 +9,17 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "npx tsx src/db/seed.ts",
-    "db:clear": "npx tsx scripts/clear-db.ts",
     "generate-vapid": "npx tsx scripts/generate-vapid-keys.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:api": "vitest run --testPathPattern='api.*test'",
     "test:components": "vitest run --testPathPattern='components.*test'",
     "test:middleware": "vitest run --testPathPattern='middleware.*test'",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "db:rollover": "npx tsx scripts/rollover.ts",
+    "db:import-json": "npx tsx scripts/import-bracket-json.ts"
   },
   "dependencies": {
-    "@remotion/cli": "^4.0.436",
-    "@remotion/player": "^4.0.436",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.2",
     "@tanstack/react-query": "^5.90.21",
@@ -31,7 +29,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-icons": "^5.6.0",
-    "remotion": "^4.0.436",
     "web-push": "^3.6.7",
     "zod": "^4.3.6",
     "zustand": "^5.0.12"
