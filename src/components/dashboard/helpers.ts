@@ -58,6 +58,24 @@ export function formatEastern(
 }
 
 /** "7:15 PM ET"-style tip time. */
+/** "Sun, Mar 14, 2027" for a `YYYY-MM-DD` or ISO value, read as an Eastern calendar day. */
+export function formatEasternDate(value: string | Date): string {
+  const date =
+    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T12:00:00-04:00`)
+      : typeof value === "string"
+        ? new Date(value)
+        : value;
+  if (Number.isNaN(date.getTime())) return "TBD";
+  return date.toLocaleDateString("en-US", {
+    timeZone: EASTERN_TZ,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export function formatEasternTime(value: string | Date): string {
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "TBD";

@@ -1,26 +1,31 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import FeatureIcon from "@/components/FeatureIcon";
 import SectionDivider from "@/components/SectionDivider";
-import { ChampionModal } from "@/components/ChampionModal";
 import { LockCountdown } from "@/components/LockCountdown";
+import { WaitlistForm } from "@/components/WaitlistForm";
+import { formatEastern, formatEasternDate } from "@/components/dashboard/helpers";
 import { createClient } from "@/lib/supabase/server";
-import {
-  getChampion,
-  getEffectivePhase,
-  getScoringMultipliers,
-  getTournamentConfig,
-} from "@/lib/tournament";
-import { REQUIRED_PICKS } from "@/lib/tournament-structure";
+import { getScoringMultipliers, getSeason, type ChampionInfo } from "@/lib/tournament";
+import { REQUIRED_PICKS, type YearDefaults } from "@/lib/tournament-structure";
 import type { TournamentPhase } from "@/types";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getTournamentConfig();
-  const year = config?.year ?? new Date().getFullYear();
+  const { displayYear, offSeason, upcoming } = await getSeason();
   return {
-    title: { absolute: `March Madness ${year} Bracket Challenge` },
-    description: `Fill out your ${year} bracket, climb the leaderboard, and wager with friends.`,
+    title: { absolute: `March Madness ${displayYear} Bracket Challenge` },
+    description: offSeason
+      ? `${displayYear} brackets open ${selectionSundayCopy(upcoming)}. Join the waitlist to hear when, then climb the leaderboard and wager with friends.`
+      : `Fill out your ${displayYear} bracket, climb the leaderboard, and wager with friends.`,
   };
+}
+
+/** "Selection Sunday, Mar 14" — or just "Selection Sunday" when next year's dates aren't known yet. */
+function selectionSundayCopy(upcoming: YearDefaults | null): string {
+  if (!upcoming) return "on Selection Sunday";
+  const day = formatEasternDate(upcoming.selectionSunday).replace(/^\w+, /, "").replace(/, \d{4}$/, "");
+  return `Selection Sunday, ${day}`;
 }
 
 interface Cta {
@@ -29,10 +34,11 @@ interface Cta {
   style: "retro-btn-primary" | "retro-btn-gold" | "retro-btn-secondary";
 }
 
-function ctasFor(phase: TournamentPhase, loggedIn: boolean): Cta[] {
+function ctasFor(phase: TournamentPhase, loggedIn: boolean, tournamentYear: number): Cta[] {
   if (phase === "completed") {
     return [
-      { href: "/leaderboard", label: "Final Standings", style: "retro-btn-gold" },
+      { href: "#waitlist", label: loggedIn ? "Get Notified" : "Join the Waitlist", style: "retro-btn-primary" },
+      { href: "/leaderboard", label: `${tournamentYear} Final Standings`, style: "retro-btn-gold" },
       { href: "/schedule", label: "Results", style: "retro-btn-secondary" },
     ];
   }
@@ -54,26 +60,95 @@ function ctasFor(phase: TournamentPhase, loggedIn: boolean): Cta[] {
   ];
 }
 
-function stepOneCopy(phase: TournamentPhase, year: number): string {
+function stepOneCopy(
+  phase: TournamentPhase,
+  tournamentYear: number,
+  displayYear: number,
+  upcoming: YearDefaults | null
+): string {
   if (phase === "completed")
-    return `The ${year} tournament is in the books. Brackets reopen for ${year + 1} — join the waitlist to hear when.`;
+    return `The ${tournamentYear} tournament is in the books. ${displayYear} brackets open ${selectionSundayCopy(upcoming)} — join the waitlist to hear when.`;
   if (phase !== "pre_tournament")
-    return `Brackets are locked for ${year}. Follow your ${REQUIRED_PICKS} picks as the rounds play out and watch the upsets pay off.`;
+    return `Brackets are locked for ${tournamentYear}. Follow your ${REQUIRED_PICKS} picks as the rounds play out and watch the upsets pay off.`;
   return `Fill out your bracket with all ${REQUIRED_PICKS} picks before the First Round tips off. Pick upsets for bonus points.`;
+}
+
+function TeamLogo({ name, logoUrl, size }: { name: string; logoUrl: string | null; size: number }) {
+  if (!logoUrl) return null;
+  return (
+    <span className="relative inline-block shrink-0" style={{ width: size, height: size }}>
+      <Image src={logoUrl} alt={name} fill className="object-contain" unoptimized />
+    </span>
+  );
+}
+
+/** "2026 champions: Michigan def. UConn 69–63" with the logo, linking to the final standings. */
+function ChampionLine({ year, champion }: { year: number; champion: ChampionInfo }) {
+  const hasScores = champion.winnerScore !== null && champion.loserScore !== null;
+  return (
+    <p className="font-body text-cream/70 text-xs mt-6 flex items-center justify-center gap-2 flex-wrap">
+      <TeamLogo name={champion.winner.name} logoUrl={champion.winner.logoUrl} size={24} />
+      <span>
+        {year} champions:{" "}
+        <Link href="/leaderboard" className="text-gold font-bold hover:underline">
+          {champion.winner.name}
+        </Link>
+        {champion.runnerUp && (
+          <>
+            {" "}
+            def. {champion.runnerUp.name}
+            {hasScores && (
+              <>
+                {" "}
+                {champion.winnerScore}–{champion.loserScore}
+              </>
+            )}
+          </>
+        )}
+      </span>
+    </p>
+  );
+}
+
+/** Off-season callout under the hero CTAs: when brackets open, plus the waitlist signup. */
+function OffSeasonCallout({
+  displayYear,
+  upcoming,
+  defaultEmail,
+}: {
+  displayYear: number;
+  upcoming: YearDefaults | null;
+  defaultEmail: string | null;
+}) {
+  return (
+    <div
+      id="waitlist"
+      className="mt-8 mx-auto max-w-md border-2 border-gold/60 bg-navy/60 rounded px-5 py-5 text-center scroll-mt-24"
+    >
+      <p className="font-display text-gold text-[0.6rem] leading-relaxed">
+        {displayYear} BRACKETS OPEN
+        <br />
+        SELECTION SUNDAY
+      </p>
+      {upcoming && (
+        <p className="font-body text-cream/70 text-[0.7rem] mt-2">
+          {formatEasternDate(upcoming.selectionSunday)} · brackets lock{" "}
+          {formatEastern(upcoming.lockDeadline)}
+        </p>
+      )}
+      <WaitlistForm nextYear={displayYear} defaultEmail={defaultEmail} className="mt-4" />
+    </div>
+  );
 }
 
 export default async function HomePage() {
   const supabase = await createClient();
-  const [config, champion, userRes] = await Promise.all([
-    getTournamentConfig(),
-    getChampion(),
-    supabase.auth.getUser(),
-  ]);
-  const loggedIn = !!userRes.data.user;
-  const year = config?.year ?? new Date().getFullYear();
-  const phase = getEffectivePhase(config, !!champion);
+  const [season, userRes] = await Promise.all([getSeason(), supabase.auth.getUser()]);
+  const { config, champion, phase, tournamentYear, displayYear, offSeason, upcoming } = season;
+  const user = userRes.data.user;
+  const loggedIn = !!user;
   const multipliers = getScoringMultipliers(config);
-  const ctas = ctasFor(phase, loggedIn);
+  const ctas = ctasFor(phase, loggedIn, tournamentYear);
 
   const scoringStrip = [
     { round: "R1", points: multipliers.first_round },
@@ -86,27 +161,6 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-[calc(100vh-8rem)]">
-      {phase === "completed" && champion && (
-        <ChampionModal
-          year={year}
-          nextYear={year + 1}
-          champion={{
-            name: champion.winner.name,
-            logoUrl: champion.winner.logoUrl,
-            score: champion.winnerScore,
-          }}
-          runnerUp={
-            champion.runnerUp
-              ? {
-                  name: champion.runnerUp.name,
-                  logoUrl: champion.runnerUp.logoUrl,
-                  score: champion.loserScore,
-                }
-              : null
-          }
-        />
-      )}
-
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-navy py-12 sm:py-20">
         <div className="absolute inset-0 crt-effect" />
@@ -172,7 +226,7 @@ export default async function HomePage() {
               <br />
               MADNESS
               <br />
-              <span className="text-burnt-orange">{year}</span>
+              <span className="text-burnt-orange">{displayYear}</span>
             </h1>
           </div>
 
@@ -238,10 +292,16 @@ export default async function HomePage() {
             </div>
           )}
 
+          {offSeason && (
+            <OffSeasonCallout
+              displayYear={displayYear}
+              upcoming={upcoming}
+              defaultEmail={user?.email ?? null}
+            />
+          )}
+
           {phase === "completed" && champion && (
-            <p className="font-body text-cream/70 text-xs mt-6">
-              {year} champion: <span className="text-gold font-bold">{champion.winner.name}</span>
-            </p>
+            <ChampionLine year={tournamentYear} champion={champion} />
           )}
         </div>
       </section>
@@ -256,7 +316,7 @@ export default async function HomePage() {
             <div className="scoreboard-heading text-center text-[0.6rem] mb-4 rounded-t">STEP 1</div>
             <FeatureIcon icon="basketball" />
             <h3 className="font-display text-[0.65rem] text-navy mb-3">Pick Your Winners</h3>
-            <p className="font-body text-xs text-navy/70">{stepOneCopy(phase, year)}</p>
+            <p className="font-body text-xs text-navy/70">{stepOneCopy(phase, tournamentYear, displayYear, upcoming)}</p>
           </div>
           <div className="retro-card p-6">
             <div className="scoreboard-heading text-center text-[0.6rem] mb-4 rounded-t">STEP 2</div>

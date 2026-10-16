@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getTournamentConfig } from "@/lib/tournament";
+import { getSeason } from "@/lib/tournament";
 
 const links = [
   { href: "/leaderboard", label: "Leaderboard" },
@@ -9,14 +9,13 @@ const links = [
 ];
 
 export async function Footer() {
-  const config = await getTournamentConfig();
-  const year = config?.year ?? new Date().getFullYear();
+  const { displayYear } = await getSeason();
   return (
     <footer className="bg-navy text-cream-dark border-t-4 border-gold">
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="font-display text-[0.6rem] text-gold tracking-wider">
-            MARCH MADNESS {year}
+            MARCH MADNESS {displayYear}
           </p>
           <nav aria-label="Footer" className="flex flex-wrap justify-center gap-x-5 gap-y-2">
             {links.map((l) => (

@@ -3,15 +3,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getChampion,
-  getEffectivePhase,
   getScoringMultipliers,
-  getTournamentConfig,
+  getSeason,
   isPastDeadline,
   isPastWagerDeadline,
 } from "@/lib/tournament";
 import { buildLeaderboard, maxPossiblePoints } from "@/lib/scoring";
-import { REQUIRED_PICKS } from "@/lib/tournament-structure";
+import { REQUIRED_PICKS, type YearDefaults } from "@/lib/tournament-structure";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
 import type { AchievementType, GameStatus, Region, Round, TournamentPhase } from "@/types";
 import { BracketStatusCard } from "@/components/dashboard/BracketStatusCard";
@@ -23,6 +21,7 @@ import { AchievementsCard } from "@/components/dashboard/AchievementsCard";
 import {
   countRequiredPicks,
   formatEastern,
+  formatEasternDate,
   formatEasternTime,
   isWithinHours,
   pickOutcome,
@@ -78,14 +77,21 @@ function phaseLabel(phase: TournamentPhase): string {
   return ROUND_DISPLAY_NAMES[phase];
 }
 
+function selectionSundayCopy(upcoming: YearDefaults | null): string {
+  return upcoming ? formatEasternDate(upcoming.selectionSunday) : "Selection Sunday";
+}
+
 function introCopy(opts: {
   phase: TournamentPhase;
   year: number;
+  displayYear: number;
+  upcoming: YearDefaults | null;
   hasBracket: boolean;
   locked: boolean;
 }): string {
-  const { phase, year, hasBracket, locked } = opts;
-  if (phase === "completed") return `That's a wrap on ${year}. Here's how you finished.`;
+  const { phase, year, displayYear, upcoming, hasBracket, locked } = opts;
+  if (phase === "completed")
+    return `That's a wrap on ${year}. Here's how you finished. ${displayYear} brackets open ${selectionSundayCopy(upcoming)}.`;
   if (phase !== "pre_tournament")
     return "The tournament is underway. Follow today's games and track your standing below.";
   if (!hasBracket)
@@ -103,8 +109,7 @@ export default async function DashboardPage() {
   if (!user) redirect("/login?redirect=/dashboard");
 
   const [
-    config,
-    champion,
+    season,
     profileRes,
     bracketRes,
     rankedRes,
@@ -113,8 +118,7 @@ export default async function DashboardPage() {
     wagersRes,
     achievementsRes,
   ] = await Promise.all([
-    getTournamentConfig(),
-    getChampion(),
+    getSeason(),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
     supabase
       .from("brackets")
@@ -170,8 +174,7 @@ export default async function DashboardPage() {
     (a) => a.achievement_type as AchievementType
   );
 
-  const year = config?.year ?? new Date().getFullYear();
-  const phase = getEffectivePhase(config, !!champion);
+  const { config, phase, tournamentYear: year, displayYear, upcoming } = season;
   const preLock = phase === "pre_tournament";
   const completed = phase === "completed";
   const pastDeadline = isPastDeadline(config);
@@ -262,7 +265,7 @@ export default async function DashboardPage() {
     <div className="max-w-6xl mx-auto px-4 py-8">
       <h1 className="font-display text-navy text-sm mb-2">Welcome, {displayName}</h1>
       <p className="font-body text-xs text-navy/60 mb-8 max-w-2xl">
-        {introCopy({ phase, year, hasBracket: !!bracket, locked })}
+        {introCopy({ phase, year, displayYear, upcoming, hasBracket: !!bracket, locked })}
       </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -301,6 +304,20 @@ export default async function DashboardPage() {
                 YOUR BRACKET
               </h2>
               {!bracket ? (
+                completed ? (
+                  <p className="font-body text-sm text-navy/70">
+                    The {year} tournament is over. {displayYear} brackets open{" "}
+                    {selectionSundayCopy(upcoming)} —{" "}
+                    <Link href="/#waitlist" className="text-burnt-orange hover:underline">
+                      join the waitlist
+                    </Link>{" "}
+                    to hear when. Until then, the{" "}
+                    <Link href="/leaderboard" className="text-burnt-orange hover:underline">
+                      final standings
+                    </Link>{" "}
+                    are up.
+                  </p>
+                ) : (
                 <p className="font-body text-sm text-navy/70">
                   Brackets are closed for {year}. You can still follow every game on the{" "}
                   <Link href="/schedule" className="text-burnt-orange hover:underline">
@@ -312,6 +329,7 @@ export default async function DashboardPage() {
                   </Link>
                   .
                 </p>
+                )
               ) : pastDeadline && pickCount >= REQUIRED_PICKS ? (
                 <p className="font-body text-sm text-navy/70">
                   The deadline passed with all {REQUIRED_PICKS} picks in — your bracket is

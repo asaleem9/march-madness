@@ -8,7 +8,7 @@ import { Footer } from "@/components/layout/Footer";
 import { Toasts } from "@/components/Toasts";
 import { createClient } from "@/lib/supabase/server";
 import { isAdminEmail } from "@/lib/admin-auth";
-import { getTournamentConfig } from "@/lib/tournament";
+import { getSeason } from "@/lib/tournament";
 
 const pressStart = Press_Start_2P({
   weight: "400",
@@ -27,12 +27,13 @@ const spaceMono = Space_Mono({
 });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const config = await getTournamentConfig();
-  const year = config?.year ?? new Date().getFullYear();
-  const title = `March Madness ${year}`;
+  const { displayYear, offSeason } = await getSeason();
+  const title = `March Madness ${displayYear}`;
   return {
     title: { default: `${title} Bracket Challenge`, template: `%s · ${title}` },
-    description: `Fill out your bracket, compete with friends, and track the ${year} NCAA Tournament in retro style.`,
+    description: offSeason
+      ? `Join the waitlist for the ${displayYear} NCAA Tournament bracket challenge. Compete with friends and track every game in retro style.`
+      : `Fill out your bracket, compete with friends, and track the ${displayYear} NCAA Tournament in retro style.`,
     applicationName: "March Madness Bracket Challenge",
     icons: { icon: "/icons/icon-192.png", apple: "/apple-touch-icon.png" },
     openGraph: {

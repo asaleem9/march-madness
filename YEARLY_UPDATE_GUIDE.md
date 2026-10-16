@@ -49,10 +49,10 @@ The app no longer needs a hand-edited team list. Each season is: run the rollove
 
 ## Final Four & title game — Apr 3 / Apr 5
 
-- [ ] After the final: wagers resolve (ties push), achievements are awarded, the homepage flips to the champion card with the next-year waitlist. Optionally set phase `completed`.
+- [ ] After the final: wagers resolve (ties push), achievements are awarded, the site flips to off-season mode: it brands itself as next year (title, hero, footer), the hero shows "brackets open Selection Sunday" with the waitlist form, and last year's champion and final standings stay viewable. Optionally set phase `completed`.
 
 ## After
 
 - [ ] The 5-minute cron stops by itself after Apr 6. Daily Vercel crons and the keep-alive workflow keep the DB awake.
 - [ ] Optional: export `brackets`/`bracket_picks` from Supabase before next year's rollover wipes them.
-- [ ] Next year: add a `YEAR_DEFAULTS[2028]` entry (dates, deadlines, ESPN dates) and repeat.
+- [ ] Next year: add a `YEAR_DEFAULTS[2028]` entry (Selection Sunday, dates, deadlines, ESPN dates) and repeat. Without it the off-season hero still says "Selection Sunday" but can't show the date.

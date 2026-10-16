@@ -2,12 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  getChampion,
-  getEffectivePhase,
-  getScoringMultipliers,
-  getTournamentConfig,
-} from "@/lib/tournament";
+import { getScoringMultipliers, getSeason } from "@/lib/tournament";
 import { LeaderboardClient } from "@/components/leaderboard/LeaderboardClient";
 import {
   buildRows,
@@ -42,16 +37,14 @@ export default async function LeaderboardPage() {
     {
       data: { user },
     },
-    config,
-    champion,
+    season,
     bracketsRes,
     gamesRes,
     teamsRes,
     achievementsRes,
   ] = await Promise.all([
     supabase.auth.getUser(),
-    getTournamentConfig(),
-    getChampion(),
+    getSeason(),
     admin
       .from("brackets")
       .select("id, user_id, name, score, profiles!inner(id, display_name, avatar_url)")
@@ -97,16 +90,18 @@ export default async function LeaderboardPage() {
     games: gamesRes.data ?? [],
     teams: teamsRes.data ?? [],
     achievements: achievementsRes.data ?? [],
-    multipliers: getScoringMultipliers(config),
+    multipliers: getScoringMultipliers(season.config),
   });
 
-  const phase = getEffectivePhase(config, !!champion);
+  const { phase, offSeason, tournamentYear } = season;
   const preTournament = phase === "pre_tournament";
-  const lastUpdate = config?.last_score_update_at ?? null;
+  const lastUpdate = season.config?.last_score_update_at ?? null;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="font-display text-navy text-sm mb-3 text-center">LEADERBOARD</h1>
+      <h1 className="font-display text-navy text-sm mb-3 text-center">
+        {offSeason ? `${tournamentYear} FINAL STANDINGS` : "LEADERBOARD"}
+      </h1>
       <p className="text-center text-xs text-navy/50 mb-1">
         Points are awarded as games finish. Later rounds are worth more, upset picks earn a 1.5×
         bonus, and tied scores share a rank.

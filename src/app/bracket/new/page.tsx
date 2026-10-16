@@ -3,7 +3,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
-import { getTournamentConfig, isPastDeadline, getScoringMultipliers } from "@/lib/tournament";
+import { getSeason, isPastDeadline, getScoringMultipliers } from "@/lib/tournament";
+import { formatEasternDate } from "@/components/dashboard/helpers";
 import type { GameWithTeams, Region } from "@/types";
 
 export const metadata: Metadata = {
@@ -30,14 +31,38 @@ export default async function NewBracketPage() {
     redirect(`/bracket/${existingBracket.id}`);
   }
 
-  const config = await getTournamentConfig();
-  const year = config?.year ?? new Date().getFullYear();
+  const { config, tournamentYear, displayYear, offSeason, upcoming } = await getSeason();
+
+  if (offSeason) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        <div className="retro-card p-6 sm:p-8 space-y-4 text-center">
+          <h1 className="font-display text-navy text-sm leading-relaxed">
+            {displayYear} BRACKETS OPEN SELECTION SUNDAY
+          </h1>
+          <p className="font-body text-sm text-navy/70">
+            The {tournamentYear} tournament is over. Brackets for {displayYear} open
+            {upcoming ? ` ${formatEasternDate(upcoming.selectionSunday)}` : " on Selection Sunday"} —
+            join the waitlist on the homepage and we&apos;ll email you when they do.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <Link href="/#waitlist" className="retro-btn retro-btn-primary">
+              Join the Waitlist
+            </Link>
+            <Link href="/leaderboard" className="retro-btn retro-btn-secondary">
+              {tournamentYear} Final Standings
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isPastDeadline(config)) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-12">
         <div className="retro-card p-6 sm:p-8 space-y-4 text-center">
-          <h1 className="font-display text-navy text-sm">BRACKETS ARE CLOSED FOR {year}</h1>
+          <h1 className="font-display text-navy text-sm">BRACKETS ARE CLOSED FOR {tournamentYear}</h1>
           <p className="font-body text-sm text-navy/70">
             The lock deadline has passed, so new brackets can&apos;t be created this year. You can still
             follow the tournament and see how everyone else is doing.

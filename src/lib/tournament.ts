@@ -2,7 +2,13 @@ import "server-only";
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Team } from "@/types";
-import type { TournamentConfigRow } from "./tournament-config";
+import {
+  getEffectivePhase,
+  getSeasonInfo,
+  type SeasonInfo,
+  type TournamentConfigRow,
+} from "./tournament-config";
+import type { TournamentPhase } from "@/types";
 
 export * from "./tournament-config";
 
@@ -66,4 +72,17 @@ export const getChampion = cache(async (): Promise<ChampionInfo | null> => {
     winnerScore: winnerIsA ? game.score_a : game.score_b,
     loserScore: winnerIsA ? game.score_b : game.score_a,
   };
+});
+
+export interface Season extends SeasonInfo {
+  config: TournamentConfigRow | null;
+  champion: ChampionInfo | null;
+  phase: TournamentPhase;
+}
+
+/** Config + champion + effective phase + season branding in one per-request cached read. */
+export const getSeason = cache(async (): Promise<Season> => {
+  const [config, champion] = await Promise.all([getTournamentConfig(), getChampion()]);
+  const phase = getEffectivePhase(config, !!champion);
+  return { config, champion, phase, ...getSeasonInfo(config, phase) };
 });

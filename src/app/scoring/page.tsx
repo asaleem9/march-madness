@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import SectionDivider from "@/components/SectionDivider";
-import { getScoringMultipliers, getTournamentConfig } from "@/lib/tournament";
-import { REQUIRED_PICKS } from "@/lib/tournament-structure";
+import { getScoringMultipliers, getSeason } from "@/lib/tournament";
+import { OPENING_ROUND_GAMES, REQUIRED_PICKS } from "@/lib/tournament-structure";
 import { ACHIEVEMENT_INFO, ACHIEVEMENT_ORDER } from "@/lib/achievements";
 import { formatEastern } from "@/components/dashboard/helpers";
 
@@ -14,10 +14,10 @@ export const metadata: Metadata = {
 };
 
 export default async function ScoringPage() {
-  const config = await getTournamentConfig();
+  const { config, displayYear, offSeason, upcoming } = await getSeason();
   const m = getScoringMultipliers(config);
-  const year = config?.year ?? new Date().getFullYear();
-  const deadline = config?.bracket_lock_deadline ?? null;
+  // Off-season: last year's deadline is stale, so show next year's planned lock instead.
+  const deadline = offSeason ? (upcoming?.lockDeadline ?? null) : (config?.bracket_lock_deadline ?? null);
   const wagerDeadline = config?.wager_creation_deadline ?? null;
 
   const rounds = [
@@ -130,7 +130,7 @@ export default async function ScoringPage() {
           </div>
         </div>
         <p className="font-body text-navy/50 text-xs text-center mt-4">
-          Max possible excludes upset bonuses. The 12 Opening Round play-ins aren&apos;t picked and
+          Max possible excludes upset bonuses. The {OPENING_ROUND_GAMES} Opening Round play-ins aren&apos;t picked and
           score nothing.
         </p>
       </section>
@@ -201,7 +201,8 @@ export default async function ScoringPage() {
                 <>
                   {" "}
                   — <span className="font-bold text-navy">{formatEastern(deadline)}</span> for{" "}
-                  {year}
+                  {displayYear}
+                  {offSeason ? " (tentative)" : ""}
                 </>
               ) : null}
               . No changes can be made after the deadline, so finalize your picks before then.
@@ -220,7 +221,7 @@ export default async function ScoringPage() {
           <div className="retro-card p-4">
             <h3 className="font-display text-burnt-orange text-[0.6rem] mb-2">OPENING ROUND</h3>
             <p className="font-body text-navy/70 text-xs">
-              The 12 play-in games aren&apos;t picked. Where a play-in feeds a first-round game, the
+              The {OPENING_ROUND_GAMES} play-in games aren&apos;t picked. Where a play-in feeds a first-round game, the
               tile shows both teams as <span className="font-bold text-navy">A / B</span> — either
               is a valid pick. Once the play-in is final your pick resolves to the winner, so you
               never lose points on a play-in you couldn&apos;t have known.

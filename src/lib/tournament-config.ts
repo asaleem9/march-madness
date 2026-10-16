@@ -1,6 +1,6 @@
 import type { ScoringMultipliers, TournamentPhase } from "@/types";
 import { DEFAULT_SCORING } from "./utils";
-import type { FinalFourPairing } from "./tournament-structure";
+import { YEAR_DEFAULTS, type FinalFourPairing, type YearDefaults } from "./tournament-structure";
 
 /** Pure helpers over the single `tournament_config` row. No I/O — safe in tests and client code. */
 
@@ -64,4 +64,37 @@ export function isPreTournament(phase: TournamentPhase): boolean {
 
 export function isTournamentOver(phase: TournamentPhase): boolean {
   return phase === "completed";
+}
+
+export interface SeasonInfo {
+  /** The year the config row describes — the tournament whose teams/games/brackets are loaded. */
+  tournamentYear: number;
+  /** The year the site brands itself as: `tournamentYear + 1` once that tournament is decided. */
+  displayYear: number;
+  /** True between a decided championship and the next rollover. */
+  offSeason: boolean;
+  /** Next season's dates (Selection Sunday, lock) while off-season, when we know them. */
+  upcoming: YearDefaults | null;
+}
+
+/**
+ * Which season the site should present. After the title game the config row
+ * still says last year (the rollover wipes it in March), so a decided
+ * championship means the site is in the off-season and should lead with the
+ * upcoming year while keeping last year's results viewable.
+ */
+export function getSeasonInfo(
+  config: Pick<TournamentConfigRow, "year"> | null | undefined,
+  phase: TournamentPhase,
+  now: Date = new Date()
+): SeasonInfo {
+  const tournamentYear = config?.year ?? now.getFullYear();
+  const offSeason = phase === "completed";
+  const displayYear = offSeason ? tournamentYear + 1 : tournamentYear;
+  return {
+    tournamentYear,
+    displayYear,
+    offSeason,
+    upcoming: offSeason ? (YEAR_DEFAULTS[displayYear] ?? null) : null,
+  };
 }

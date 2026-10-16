@@ -97,6 +97,8 @@ export interface GameSlotRow {
 
 export interface YearDefaults {
   year: number;
+  /** `YYYY-MM-DD`; the bracket reveal. Shown as "brackets open Selection Sunday" in the off-season. */
+  selectionSunday: string;
   /** ISO; brackets lock when the first R1 game tips. */
   lockDeadline: string;
   /** ISO; last moment a wager can be created/accepted. */
@@ -111,6 +113,7 @@ export interface YearDefaults {
 export const YEAR_DEFAULTS: Readonly<Record<number, YearDefaults>> = {
   2027: {
     year: 2027,
+    selectionSunday: "2027-03-14",
     lockDeadline: "2027-03-18T16:00:00Z",
     wagerDeadline: "2027-03-18T16:00:00Z",
     espnDates: ["20270316", "20270317", "20270318", "20270319"],
@@ -142,6 +145,7 @@ export const YEAR_DEFAULTS: Readonly<Record<number, YearDefaults>> = {
   // recorded 2026 ESPN scoreboards. Dates are approximate.
   2026: {
     year: 2026,
+    selectionSunday: "2026-03-15",
     lockDeadline: "2026-03-19T16:00:00Z",
     wagerDeadline: "2026-03-19T16:00:00Z",
     espnDates: ["20260317", "20260318", "20260319", "20260320"],

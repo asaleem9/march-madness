@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
-import { getTournamentConfig } from "@/lib/tournament";
+import { getSeason } from "@/lib/tournament";
 
-// Rendered on request so the year follows tournament_config without a redeploy.
+// Rendered on request so the year follows tournament_config (and the off-season flip) without a redeploy.
 export const dynamic = "force-dynamic";
 export const alt = "March Madness Bracket Challenge";
 export const size = { width: 1200, height: 630 };
@@ -13,8 +13,7 @@ const ORANGE = "#d62b4c";
 const CREAM = "#f5f0e1";
 
 export default async function OpenGraphImage() {
-  const config = await getTournamentConfig();
-  const year = config?.year ?? new Date().getFullYear();
+  const { displayYear: year } = await getSeason();
 
   return new ImageResponse(
     (

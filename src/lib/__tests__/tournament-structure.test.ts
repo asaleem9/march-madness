@@ -119,3 +119,15 @@ describe("seed helpers", () => {
     expect(REGION_ORDER).toEqual(["east", "west", "south", "midwest"]);
   });
 });
+
+describe("YEAR_DEFAULTS", () => {
+  it("puts Selection Sunday before the Opening Round and the lock for every year", () => {
+    for (const d of Object.values(YEAR_DEFAULTS)) {
+      expect(d.selectionSunday).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const sunday = new Date(`${d.selectionSunday}T23:59:59Z`);
+      expect(sunday.getUTCDay()).toBe(0);
+      expect(sunday.getTime()).toBeLessThan(new Date(d.dates.openingRound[0]).getTime());
+      expect(sunday.getTime()).toBeLessThan(new Date(d.lockDeadline).getTime());
+    }
+  });
+});
