@@ -67,8 +67,40 @@ describe("GameSlot", () => {
 
     expect(screen.getByText("Duke")).toBeInTheDocument();
     expect(screen.getByText("Lehigh")).toBeInTheDocument();
-    expect(screen.getByText("Seed 1")).toBeInTheDocument();
-    expect(screen.getByText("Seed 16")).toBeInTheDocument();
+    expect(screen.getByLabelText("Seed 1")).toHaveClass("seed-badge");
+    expect(screen.getByLabelText("Seed 16")).toHaveClass("seed-badge");
+    // The old "Seed N" caption is gone in favour of the badge
+    expect(screen.queryByText("Seed 1")).not.toBeInTheDocument();
+  });
+
+  it("shows title odds only while editable", () => {
+    const { rerender } = render(
+      <GameSlot
+        gameSlot={5}
+        teamA={duke}
+        teamB={lehigh}
+        selectedTeamId={null}
+        winnerId={null}
+        isEditable={true}
+        isCorrect={null}
+        onPick={mockOnPick}
+      />
+    );
+    expect(screen.getAllByText("5.0%")).toHaveLength(2);
+
+    rerender(
+      <GameSlot
+        gameSlot={5}
+        teamA={duke}
+        teamB={lehigh}
+        selectedTeamId={null}
+        winnerId={null}
+        isEditable={false}
+        isCorrect={null}
+        onPick={mockOnPick}
+      />
+    );
+    expect(screen.queryByText("5.0%")).not.toBeInTheDocument();
   });
 
   it("shows TBD for null teams", () => {
@@ -89,29 +121,76 @@ describe("GameSlot", () => {
     expect(tbdElements).toHaveLength(2);
   });
 
-  it("shows First Four hints when team is null but hint provided", () => {
+  it("shows a two-button play-in picker when team is null but hint provided", () => {
     render(
       <GameSlot
         gameSlot={5}
         teamA={null}
         teamB={lehigh}
-        selectedTeamId={null}
+        selectedTeamId={201}
         winnerId={null}
         isEditable={true}
         isCorrect={null}
         onPick={mockOnPick}
-        firstFourHintA={{
+        playInHintA={{
           teamAName: "Texas",
           teamBName: "NC State",
           teamAId: 200,
           teamBId: 201,
+          seed: 11,
         }}
       />
     );
 
-    expect(screen.getByText("Texas")).toBeInTheDocument();
-    expect(screen.getByText("NC State")).toBeInTheDocument();
-    expect(screen.getByText("Play-In")).toBeInTheDocument();
+    const texas = screen.getByRole("button", { name: /Texas/ });
+    const ncState = screen.getByRole("button", { name: /NC State/ });
+    expect(texas).toHaveAttribute("aria-pressed", "false");
+    expect(ncState).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Play-in")).toBeInTheDocument();
+
+    fireEvent.click(texas);
+    expect(mockOnPick).toHaveBeenCalledWith(5, 200);
+  });
+
+  it("renders a ghost row for a pick that is no longer in the slot", () => {
+    const { container } = render(
+      <GameSlot
+        gameSlot={37}
+        teamA={lehigh}
+        teamB={null}
+        selectedTeamId={101}
+        winnerId={null}
+        isEditable={false}
+        isCorrect={null}
+        onPick={mockOnPick}
+        ghostPick={{ team: { ...duke, eliminated: true }, side: "top", lostPlayIn: false }}
+        ownerLabel="Ali's"
+      />
+    );
+    const ghost = container.querySelector(".game-slot-ghost");
+    expect(ghost).not.toBeNull();
+    expect(ghost!.textContent).toBe("Ali's pick: DUK ✗ (out)");
+  });
+
+  it("flags a dead play-in pick with a repick prompt while editable", () => {
+    render(
+      <GameSlot
+        gameSlot={5}
+        teamA={lehigh}
+        teamB={duke}
+        selectedTeamId={300}
+        winnerId={null}
+        isEditable={true}
+        isCorrect={null}
+        onPick={mockOnPick}
+        ghostPick={{
+          team: makeTeam({ id: 300, name: "Texas", seed: 11 }),
+          side: "top",
+          lostPlayIn: true,
+        }}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Your pick TEX lost the play-in — repick");
   });
 
   it("calls onPick when editable and clicked", () => {

@@ -36,6 +36,13 @@ vi.mock("@/lib/supabase/admin", () => ({
           })),
         };
       }
+      if (table === "notification_queue") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => Promise.resolve({ count: 2, error: null })),
+          })),
+        };
+      }
       return {};
     }),
   })),
@@ -90,7 +97,7 @@ describe("GET /api/admin/config", () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(json).toEqual(configData);
+    expect(json).toEqual({ ...configData, queue_depth: 2 });
   });
 });
 

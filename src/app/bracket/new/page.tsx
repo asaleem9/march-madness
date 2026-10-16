@@ -1,7 +1,14 @@
+import type { Metadata } from "next";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
+import { getTournamentConfig, isPastDeadline, getScoringMultipliers } from "@/lib/tournament";
 import type { GameWithTeams, Region } from "@/types";
+
+export const metadata: Metadata = {
+  title: "Create your bracket",
+};
 
 export default async function NewBracketPage() {
   const supabase = await createClient();
@@ -9,7 +16,7 @@ export default async function NewBracketPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/login");
+  if (!user) redirect("/login?redirect=%2Fbracket%2Fnew");
 
   // Enforce one bracket per user — redirect to existing bracket
   const { data: existingBracket } = await supabase
@@ -17,14 +24,39 @@ export default async function NewBracketPage() {
     .select("id")
     .eq("user_id", user.id)
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (existingBracket) {
     redirect(`/bracket/${existingBracket.id}`);
   }
 
+  const config = await getTournamentConfig();
+  const year = config?.year ?? new Date().getFullYear();
+
+  if (isPastDeadline(config)) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        <div className="retro-card p-6 sm:p-8 space-y-4 text-center">
+          <h1 className="font-display text-navy text-sm">BRACKETS ARE CLOSED FOR {year}</h1>
+          <p className="font-body text-sm text-navy/70">
+            The lock deadline has passed, so new brackets can&apos;t be created this year. You can still
+            follow the tournament and see how everyone else is doing.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <Link href="/leaderboard" className="retro-btn retro-btn-primary">
+              Leaderboard
+            </Link>
+            <Link href="/schedule" className="retro-btn retro-btn-secondary">
+              Schedule
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Fetch all games with teams
-  const { data: games } = await supabase
+  const { data: games, error: gamesError } = await supabase
     .from("games")
     .select(
       `
@@ -35,6 +67,7 @@ export default async function NewBracketPage() {
     `
     )
     .order("game_slot");
+  if (gamesError) throw new Error(`Failed to load games: ${gamesError.message}`);
 
   function mapTeam(t: Record<string, unknown> | null) {
     if (!t) return null;
@@ -77,14 +110,15 @@ export default async function NewBracketPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="font-display text-navy text-sm mb-6">
-        CREATE NEW BRACKET
-      </h1>
+      <p className="font-display text-navy/60 text-[0.6rem] mb-6">CREATE NEW BRACKET</p>
       <BracketBuilder
         games={formattedGames}
         isLocked={false}
         isOwner={true}
         defaultName={defaultBracketName}
+        userId={user.id}
+        ownerName={typeof displayName === "string" ? displayName : null}
+        multipliers={getScoringMultipliers(config)}
       />
     </div>
   );

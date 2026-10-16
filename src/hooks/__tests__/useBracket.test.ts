@@ -198,4 +198,84 @@ describe("useBracketStore", () => {
       expect(useBracketStore.getState().isDirty).toBe(false);
     });
   });
+
+  describe("hydrate", () => {
+    it("sets picks and name without marking dirty", () => {
+      useBracketStore.getState().setPick(9, "first_round", 9); // dirty
+      useBracketStore.getState().hydrate({
+        picks: [{ gameSlot: 1, round: "first_round", pickedTeamId: 101 }],
+        bracketName: "Server Name",
+      });
+      const state = useBracketStore.getState();
+      expect(state.picks.size).toBe(1);
+      expect(state.picks.get(1)!.pickedTeamId).toBe(101);
+      expect(state.bracketName).toBe("Server Name");
+      expect(state.isDirty).toBe(false);
+      expect(state.previousPicks).toBeNull();
+    });
+
+    it("keeps the current name when none is given", () => {
+      useBracketStore.getState().setBracketName("Keep me");
+      useBracketStore.getState().hydrate({ picks: [] });
+      expect(useBracketStore.getState().bracketName).toBe("Keep me");
+      expect(useBracketStore.getState().isDirty).toBe(false);
+    });
+  });
+
+  describe("undo", () => {
+    it("restores the snapshot taken by pushUndo and marks dirty", () => {
+      useBracketStore.getState().setPick(1, "first_round", 101);
+      useBracketStore.getState().setPick(5, "second_round", 101);
+      useBracketStore.setState({ isDirty: false });
+
+      useBracketStore.getState().pushUndo();
+      useBracketStore.getState().clearDownstreamPicks(1, 101, buildGameChain());
+      useBracketStore.getState().setPick(1, "first_round", 202);
+      expect(useBracketStore.getState().picks.get(1)!.pickedTeamId).toBe(202);
+      expect(useBracketStore.getState().picks.has(5)).toBe(false);
+
+      useBracketStore.getState().undo();
+      const state = useBracketStore.getState();
+      expect(state.picks.get(1)!.pickedTeamId).toBe(101);
+      expect(state.picks.get(5)!.pickedTeamId).toBe(101);
+      expect(state.isDirty).toBe(true);
+      expect(state.previousPicks).toBeNull();
+    });
+
+    it("is single-level: a second undo is a no-op", () => {
+      useBracketStore.getState().pushUndo();
+      useBracketStore.getState().setPick(1, "first_round", 101);
+      useBracketStore.getState().undo();
+      useBracketStore.getState().undo();
+      expect(useBracketStore.getState().picks.size).toBe(0);
+    });
+  });
+
+  describe("setPicks / clearDownstreamPicks count", () => {
+    it("merges several picks at once", () => {
+      useBracketStore.getState().setPick(1, "first_round", 101);
+      useBracketStore.getState().setPicks([
+        { gameSlot: 2, round: "first_round", pickedTeamId: 202 },
+        { gameSlot: 3, round: "first_round", pickedTeamId: 303 },
+      ]);
+      expect(useBracketStore.getState().picks.size).toBe(3);
+      expect(useBracketStore.getState().isDirty).toBe(true);
+    });
+
+    it("clearDownstreamPicks returns how many picks it removed", () => {
+      const games = buildGameChain();
+      useBracketStore.getState().setPick(1, "first_round", 101);
+      useBracketStore.getState().setPick(5, "second_round", 101);
+      useBracketStore.getState().setPick(7, "sweet_16", 101);
+      expect(useBracketStore.getState().clearDownstreamPicks(1, 101, games)).toBe(2);
+      expect(useBracketStore.getState().clearDownstreamPicks(1, 101, games)).toBe(0);
+    });
+
+    it("markClean / markDirty toggle isDirty", () => {
+      useBracketStore.getState().markDirty();
+      expect(useBracketStore.getState().isDirty).toBe(true);
+      useBracketStore.getState().markClean();
+      expect(useBracketStore.getState().isDirty).toBe(false);
+    });
+  });
 });

@@ -14,11 +14,13 @@ vi.mock("next/navigation", () => ({
 
 const mockSignUp = vi.fn();
 const mockSignInWithOAuth = vi.fn();
+const mockResend = vi.fn();
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: {
       signUp: mockSignUp,
       signInWithOAuth: mockSignInWithOAuth,
+      resend: mockResend,
     },
   }),
 }));
@@ -78,6 +80,7 @@ describe("SignupPage", () => {
       error: null,
     });
     mockSignInWithOAuth.mockResolvedValue({ error: null });
+    mockResend.mockResolvedValue({ error: null });
   });
 
   it("renders form fields for display name, email, and password", () => {
@@ -255,5 +258,59 @@ describe("SignupPage", () => {
         },
       });
     });
+  });
+
+  it("pairs every input with a label", () => {
+    render(<SignupPage />);
+
+    expect(screen.getByLabelText("DISPLAY NAME")).toHaveAttribute("id", "signup-display-name");
+    expect(screen.getByLabelText("EMAIL")).toHaveAttribute("id", "signup-email");
+    expect(screen.getByLabelText("PASSWORD")).toHaveAttribute("id", "signup-password");
+    expect(screen.getByLabelText("CONFIRM PASSWORD")).toHaveAttribute(
+      "id",
+      "signup-confirm-password",
+    );
+  });
+
+  it("renders validation errors in a role=alert box", async () => {
+    render(<SignupPage />);
+    fireEvent.change(screen.getByPlaceholderText("BracketKing42"), { target: { value: "P" } });
+    fireEvent.change(screen.getByPlaceholderText("your@email.com"), { target: { value: "a@b.com" } });
+    fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), { target: { value: "abcdef" } });
+    fireEvent.change(screen.getByPlaceholderText("Retype your password"), { target: { value: "abcdeg" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match");
+  });
+
+  it("success screen offers resend, spam hint, and login/reset links", async () => {
+    mockSignUp.mockResolvedValue({ data: { session: null }, error: null });
+
+    render(<SignupPage />);
+    fillAndSubmitForm();
+
+    await screen.findByText("CHECK YOUR EMAIL");
+    expect(screen.getByText(/spam folder/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^log in$/i })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: /reset password/i })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /resend email/i }));
+    await waitFor(() => {
+      expect(mockResend).toHaveBeenCalledWith({ type: "signup", email: "test@example.com" });
+    });
+    expect(await screen.findByRole("button", { name: /resend in 60s/i })).toBeDisabled();
+  });
+
+  it("surfaces OAuth errors and re-enables the Google button", async () => {
+    mockSignInWithOAuth.mockResolvedValue({ error: { message: "Provider is not enabled" } });
+
+    render(<SignupPage />);
+    fireEvent.click(screen.getByRole("button", { name: /sign up with google/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider is not enabled");
+    expect(screen.getByRole("button", { name: /sign up with google/i })).not.toBeDisabled();
   });
 });

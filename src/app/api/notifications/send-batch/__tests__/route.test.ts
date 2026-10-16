@@ -1,78 +1,42 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
+import { createRecordingClient, type RecordedCall } from "@/test/helpers";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockSendPushNotification = vi.fn().mockResolvedValue(true);
-const mockSendSMS = vi.fn().mockResolvedValue(true);
-const mockSendEmail = vi.fn().mockResolvedValue(true);
-const mockIsInQuietHours = vi.fn().mockReturnValue(false);
-const mockGetPreferredChannels = vi.fn().mockReturnValue(["push"]);
+const mockSendPushNotification = vi.fn();
+const mockSendSMS = vi.fn();
+const mockSendEmail = vi.fn();
+const mockIsInQuietHours = vi.fn();
 
-vi.mock("@/lib/notifications", () => ({
-  sendPushNotification: (...args: unknown[]) => mockSendPushNotification(...args),
-  sendSMS: (...args: unknown[]) => mockSendSMS(...args),
-  sendEmail: (...args: unknown[]) => mockSendEmail(...args),
-  isInQuietHours: (...args: unknown[]) => mockIsInQuietHours(...args),
-  getPreferredChannels: (...args: unknown[]) => mockGetPreferredChannels(...args),
-}));
-
-type MockBuilder = {
-  select: ReturnType<typeof vi.fn>;
-  insert: ReturnType<typeof vi.fn>;
-  update: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  eq: ReturnType<typeof vi.fn>;
-  in: ReturnType<typeof vi.fn>;
-  gte: ReturnType<typeof vi.fn>;
-  single: ReturnType<typeof vi.fn>;
-  order: ReturnType<typeof vi.fn>;
-};
-
-let fromImpl: ((table: string) => MockBuilder) | null = null;
-
-function createBuilder(defaultData: unknown = null): MockBuilder {
-  const result = { data: defaultData, error: null, count: 0 };
-  const builder: MockBuilder = {
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockResolvedValue(result),
-    update: vi.fn().mockReturnThis(),
-    delete: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    gte: vi.fn().mockReturnThis(),
-    single: vi.fn().mockResolvedValue(result),
-    order: vi.fn().mockResolvedValue(result),
+vi.mock("@/lib/notifications", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/notifications")>(
+    "@/lib/notifications"
+  );
+  return {
+    ...actual,
+    sendPushNotification: (...args: unknown[]) => mockSendPushNotification(...args),
+    sendSMS: (...args: unknown[]) => mockSendSMS(...args),
+    sendEmail: (...args: unknown[]) => mockSendEmail(...args),
+    isInQuietHours: (...args: unknown[]) => mockIsInQuietHours(...args),
   };
-  return builder;
-}
+});
 
-const mockAuth = {
-  admin: {
-    getUserById: vi.fn().mockResolvedValue({ data: { user: null } }),
-  },
-};
-
-const mockSupabase = {
-  from: vi.fn((table: string) => {
-    if (fromImpl) return fromImpl(table);
-    return createBuilder();
-  }),
-  auth: mockAuth,
-};
+let client: ReturnType<typeof createRecordingClient>;
+const mockGetUserById = vi.fn();
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(() => mockSupabase),
+  createAdminClient: vi.fn(() => ({
+    ...client,
+    auth: { admin: { getUserById: mockGetUserById } },
+  })),
 }));
 
-// Server client is used by the admin-session auth fallback. Default to no user
-// so only the CRON_SECRET path authorizes in these tests.
-const mockServerAuth = {
-  getUser: vi.fn().mockResolvedValue({ data: { user: null } }),
-};
+// Server client is only used by the admin-session auth fallback.
+const mockServerGetUser = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ auth: mockServerAuth })),
+  createClient: vi.fn(async () => ({ auth: { getUser: mockServerGetUser } })),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,24 +44,27 @@ vi.mock("@/lib/supabase/server", () => ({
 const mockRequest = (headers?: Record<string, string>) =>
   ({
     headers: {
-      get: (name: string) => headers?.[name.toLowerCase()] ?? headers?.[name] ?? null,
+      get: (name: string) => headers?.[name.toLowerCase()] ?? null,
     },
   }) as unknown as NextRequest;
 
-function makeQueueItem(overrides: Record<string, unknown> = {}) {
+const cronRequest = () => mockRequest({ authorization: "Bearer test-cron-secret" });
+
+function queueItem(overrides: Record<string, unknown> = {}) {
   return {
     id: "q-1",
     user_id: "user-1",
     type: "game_result",
-    payload: { game_id: "g1", team_a: "Duke", team_b: "Lehigh", winner: "Duke", score: "75-68" },
-    batch_key: "20260318-afternoon",
+    payload: { game_id: 1, picked: "Duke", correct: true, points: 20, winner: "Duke" },
+    batch_key: "20270318-afternoon",
     sent: false,
-    created_at: "2026-03-18T14:00:00Z",
+    attempts: 0,
+    created_at: "2027-03-18T14:00:00Z",
     ...overrides,
   };
 }
 
-function makeProfile(overrides: Record<string, unknown> = {}) {
+function profile(overrides: Record<string, unknown> = {}) {
   return {
     id: "user-1",
     display_name: "TestUser",
@@ -108,392 +75,281 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function sub(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    user_id: "user-1",
+    endpoint: "https://push.example.com/a",
+    keys: { p256dh: "pk", auth: "ak" },
+    ...overrides,
+  };
+}
+
+const eqArg = (chain: RecordedCall[], column: string) =>
+  chain.find((c) => c.method === "eq" && c.args[0] === column)?.args[1];
+
+/**
+ * Build a recording client for a scenario. `logCount` is the number of
+ * notifications_log rows "already sent today" per user.
+ */
+function setup(opts: {
+  queue: ReturnType<typeof queueItem>[];
+  profiles?: Record<string, ReturnType<typeof profile>>;
+  subs?: ReturnType<typeof sub>[];
+  logCount?: Record<string, number>;
+}) {
+  const profiles = opts.profiles ?? { "user-1": profile() };
+  const subs = opts.subs ?? [sub()];
+  client = createRecordingClient((table, chain) => {
+    const method = chain[0]?.method;
+    if (table === "notification_queue" && method === "select") return opts.queue;
+    if (table === "profiles") return profiles[eqArg(chain, "id") as string] ?? null;
+    if (table === "push_subscriptions" && method === "select") {
+      const uid = eqArg(chain, "user_id");
+      return subs.filter((s) => s.user_id === uid);
+    }
+    if (table === "notifications_log" && method === "select") {
+      const uid = eqArg(chain, "user_id") as string;
+      const n = opts.logCount?.[uid] ?? 0;
+      // createRecordingClient derives `count` from the array length.
+      return Array.from({ length: n }, (_, i) => ({ id: i }));
+    }
+    return null;
+  });
+}
+
+const sentIds = () =>
+  client
+    .updates("notification_queue")
+    .filter((u) => (u.args[0] as { sent?: boolean }).sent === true)
+    .flatMap((u) => client.filtersAfter(u).flatMap((f) => (f.method === "in" ? (f.args[1] as string[]) : [f.args[1] as string])));
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe("POST /api/notifications/send-batch", () => {
+describe("send-batch", () => {
   let POST: (request: NextRequest) => Promise<Response>;
+  let GET: (request: NextRequest) => Promise<Response>;
 
   beforeEach(async () => {
     vi.resetModules();
-    fromImpl = null;
     mockSendPushNotification.mockReset().mockResolvedValue(true);
     mockSendSMS.mockReset().mockResolvedValue(true);
     mockSendEmail.mockReset().mockResolvedValue(true);
     mockIsInQuietHours.mockReset().mockReturnValue(false);
-    mockGetPreferredChannels.mockReset().mockReturnValue(["push"]);
-    mockSupabase.from.mockClear();
-    mockAuth.admin.getUserById.mockReset().mockResolvedValue({ data: { user: null } });
-    mockServerAuth.getUser.mockReset().mockResolvedValue({ data: { user: null } });
-
+    mockGetUserById.mockReset().mockResolvedValue({ data: { user: null } });
+    mockServerGetUser.mockReset().mockResolvedValue({ data: { user: null } });
     process.env.CRON_SECRET = "test-cron-secret";
+    process.env.ADMIN_EMAILS = "admin@example.com";
+    setup({ queue: [] });
 
     const mod = await import("../route");
     POST = mod.POST;
+    GET = mod.GET;
   });
 
-  // 1. Auth check
-  it("returns 401 without a valid CRON_SECRET bearer token", async () => {
+  it("returns 401 without a valid CRON_SECRET bearer or admin session", async () => {
     const res = await POST(mockRequest({ authorization: "Bearer bad-secret" }));
     expect(res.status).toBe(401);
-    const body = await res.json();
-    expect(body.error).toBe("Unauthorized");
   });
 
-  // 2. Empty queue
-  it("returns 200 with message when queue is empty", async () => {
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: [] }),
-          }),
-        });
-      }
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
+  it("accepts an admin session instead of the cron secret", async () => {
+    mockServerGetUser.mockResolvedValue({ data: { user: { email: "admin@example.com" } } });
+    const res = await GET(mockRequest());
     expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.message).toBe("No pending notifications");
   });
 
-  // 3. Groups by user_id + batch_key
-  it("groups queue items by user_id and batch_key", async () => {
-    const queueItems = [
-      makeQueueItem({ id: "q-1", user_id: "user-1", batch_key: "20260318-afternoon" }),
-      makeQueueItem({ id: "q-2", user_id: "user-1", batch_key: "20260318-afternoon" }),
-      makeQueueItem({ id: "q-3", user_id: "user-2", batch_key: "20260318-afternoon" }),
-    ];
-    const profile1 = makeProfile({ id: "user-1" });
-    const profile2 = makeProfile({ id: "user-2" });
-    const pushSub = { id: "sub-1", user_id: "user-1", endpoint: "https://push.example.com", keys: { p256dh: "key1", auth: "auth1" } };
-
-    let markedSentIds: string[] = [];
-
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
-
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: queueItems }),
-          }),
-        });
-        builder.update.mockReturnValue({
-          in: vi.fn().mockImplementation((_col: string, ids: string[]) => {
-            markedSentIds = [...markedSentIds, ...ids];
-            return Promise.resolve({ data: null, error: null });
-          }),
-        });
-      }
-
-      if (table === "profiles") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockImplementation((_col: string, val: string) => ({
-            single: vi.fn().mockResolvedValue({
-              data: val === "user-1" ? profile1 : profile2,
-            }),
-          })),
-        });
-      }
-
-      if (table === "notifications_log") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            gte: vi.fn().mockResolvedValue({ count: 0 }),
-          }),
-        });
-        builder.insert.mockResolvedValue({ data: null, error: null });
-      }
-
-      if (table === "push_subscriptions") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: pushSub }),
-          }),
-        });
-      }
-
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
+  it("returns 200 with a message when the queue is empty", async () => {
+    const res = await POST(cronRequest());
     expect(res.status).toBe(200);
-    const body = await res.json();
+    expect((await res.json()).message).toBe("No pending notifications");
+  });
 
-    // All 3 items should be marked as sent (2 for user-1 batch + 1 for user-2 batch)
+  it("sends one consolidated message per user with personalised copy", async () => {
+    setup({
+      queue: [
+        queueItem({ id: "q-1", payload: { picked: "Duke", correct: true, points: 20 } }),
+        queueItem({ id: "q-2", payload: { picked: "Kansas", correct: false, points: 0 } }),
+        queueItem({ id: "q-3", user_id: "user-2" }),
+      ],
+      profiles: { "user-1": profile(), "user-2": profile({ id: "user-2" }) },
+      subs: [sub(), sub({ id: 2, user_id: "user-2", endpoint: "https://push.example.com/b" })],
+    });
+
+    const res = await POST(cronRequest());
+    const body = await res.json();
     expect(body.sent).toBe(3);
-
-    // Push notification should be called twice (once per batch group)
     expect(mockSendPushNotification).toHaveBeenCalledTimes(2);
 
-    // The message for user-1 should mention 2 games
-    const firstCallBody = mockSendPushNotification.mock.calls[0][1].body;
-    expect(firstCallBody).toContain("2 game(s) decided");
+    const [, payload] = mockSendPushNotification.mock.calls[0];
+    expect(payload).toEqual({
+      title: "2 games decided",
+      body: "Duke ✓ +20 · Kansas ✗ · 1 of 2 right today",
+      url: "/dashboard",
+    });
+    expect(sentIds().sort()).toEqual(["q-1", "q-2", "q-3"]);
   });
 
-  // 4. Skips users in quiet hours
-  it("skips users in quiet hours and reports them as skipped", async () => {
-    const queueItems = [
-      makeQueueItem({ id: "q-1", user_id: "user-quiet", batch_key: "20260318-evening" }),
-      makeQueueItem({ id: "q-2", user_id: "user-quiet", batch_key: "20260318-evening" }),
-    ];
-    const profile = makeProfile({ id: "user-quiet", timezone: "America/New_York" });
+  it("merges items from older batches into the same notification", async () => {
+    setup({
+      queue: [
+        queueItem({ id: "q-old", batch_key: "20270317-evening", created_at: "2027-03-17T23:00:00Z" }),
+        queueItem({ id: "q-new", payload: { picked: "Houston", correct: true, points: 10 } }),
+      ],
+    });
 
+    await POST(cronRequest());
+
+    expect(mockSendPushNotification).toHaveBeenCalledTimes(1);
+    expect(mockSendPushNotification.mock.calls[0][1].body).toBe(
+      "Houston ✓ +10 · 1 of 1 right today\n1 earlier game: 1 right"
+    );
+    expect(sentIds().sort()).toEqual(["q-new", "q-old"]);
+  });
+
+  it("skips users in quiet hours", async () => {
     mockIsInQuietHours.mockReturnValue(true);
+    setup({ queue: [queueItem(), queueItem({ id: "q-2" })] });
 
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
-
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: queueItems }),
-          }),
-        });
-        builder.update.mockReturnValue({
-          in: vi.fn().mockResolvedValue({ data: null, error: null }),
-          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-        });
-      }
-
-      if (table === "profiles") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: profile }),
-          }),
-        });
-      }
-
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-
+    const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(2);
     expect(body.sent).toBe(0);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
     expect(mockIsInQuietHours).toHaveBeenCalledWith("America/New_York");
   });
 
-  // 5. Enforces 3/day rate limit
-  it("enforces the 3-per-day rate limit and skips over-limit users", async () => {
-    const queueItems = [
-      makeQueueItem({ id: "q-1", user_id: "user-limited" }),
-    ];
-    const profile = makeProfile({ id: "user-limited" });
+  it("enforces the 3-per-day cap", async () => {
+    setup({ queue: [queueItem()], logCount: { "user-1": 3 } });
 
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
-
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: queueItems }),
-          }),
-        });
-        builder.update.mockReturnValue({
-          in: vi.fn().mockResolvedValue({ data: null, error: null }),
-          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-        });
-      }
-
-      if (table === "profiles") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: profile }),
-          }),
-        });
-      }
-
-      if (table === "notifications_log") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            gte: vi.fn().mockResolvedValue({ count: 3 }), // already at limit
-          }),
-        });
-      }
-
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-
+    const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(1);
-    expect(body.sent).toBe(0);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
   });
 
-  // 6. Sends via preferred channels
-  it("sends notifications via all preferred channels (push, sms, email)", async () => {
-    const queueItems = [makeQueueItem({ id: "q-1", user_id: "user-multi" })];
-    const profile = makeProfile({
-      id: "user-multi",
-      phone: "+15559876543",
-      notification_preferences: { push: true, sms: true, email: true, digest_only: false },
-    });
-    const pushSub = {
-      id: "sub-1",
-      user_id: "user-multi",
-      endpoint: "https://push.example.com/multi",
-      keys: { p256dh: "pk", auth: "ak" },
-    };
-
-    mockGetPreferredChannels.mockReturnValue(["push", "sms", "email"]);
-    mockAuth.admin.getUserById.mockResolvedValue({
-      data: { user: { email: "user@example.com" } },
+  it("limits digest_only users to one notification per day", async () => {
+    setup({
+      queue: [queueItem()],
+      profiles: {
+        "user-1": profile({
+          notification_preferences: { push: true, sms: false, email: false, digest_only: true },
+        }),
+      },
+      logCount: { "user-1": 1 },
     });
 
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
-
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: queueItems }),
-          }),
-        });
-        builder.update.mockReturnValue({
-          in: vi.fn().mockResolvedValue({ data: null, error: null }),
-          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-        });
-      }
-
-      if (table === "profiles") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: profile }),
-          }),
-        });
-      }
-
-      if (table === "notifications_log") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            gte: vi.fn().mockResolvedValue({ count: 0 }),
-          }),
-        });
-        builder.insert.mockResolvedValue({ data: null, error: null });
-      }
-
-      if (table === "push_subscriptions") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: pushSub }),
-          }),
-        });
-      }
-
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.sent).toBe(1);
-
-    // Push was called with subscription data and message
-    expect(mockSendPushNotification).toHaveBeenCalledTimes(1);
-    expect(mockSendPushNotification).toHaveBeenCalledWith(
-      { endpoint: "https://push.example.com/multi", keys: { p256dh: "pk", auth: "ak" } },
-      expect.objectContaining({ title: "March Madness Update", body: expect.any(String) })
-    );
-
-    // SMS was called with phone and message
-    expect(mockSendSMS).toHaveBeenCalledTimes(1);
-    expect(mockSendSMS).toHaveBeenCalledWith("+15559876543", expect.any(String));
-
-    // Email was called after fetching user email via admin auth
-    expect(mockSendEmail).toHaveBeenCalledTimes(1);
-    expect(mockSendEmail).toHaveBeenCalledWith(
-      "user@example.com",
-      "March Madness Update",
-      expect.any(String)
-    );
+    const body = await (await POST(cronRequest())).json();
+    expect(body.skipped).toBe(1);
+    expect(mockSendPushNotification).not.toHaveBeenCalled();
+    // The item stays queued (not marked sent) for tomorrow's digest.
+    expect(sentIds()).toEqual([]);
   });
 
-  // 7. Cleans up stale push subscriptions
-  it("deletes stale push subscription when push notification fails", async () => {
-    const queueItems = [makeQueueItem({ id: "q-stale", user_id: "user-stale" })];
-    const profile = makeProfile({ id: "user-stale" });
-    const pushSub = {
-      id: "sub-stale",
-      user_id: "user-stale",
-      endpoint: "https://push.example.com/gone",
-      keys: { p256dh: "pk", auth: "ak" },
-    };
+  it("discards items for users who turned every channel off", async () => {
+    setup({
+      queue: [queueItem()],
+      profiles: {
+        "user-1": profile({
+          notification_preferences: { push: false, sms: false, email: false, digest_only: false },
+        }),
+      },
+    });
 
-    // Push fails (returns false — simulating 410 gone)
+    const body = await (await POST(cronRequest())).json();
+    expect(body.discarded).toBe(1);
+    expect(body.sent).toBe(0);
+    expect(mockSendPushNotification).not.toHaveBeenCalled();
+    expect(sentIds()).toEqual(["q-1"]);
+  });
+
+  it("sends via every preferred channel and logs once", async () => {
+    mockGetUserById.mockResolvedValue({ data: { user: { email: "user@example.com" } } });
+    setup({
+      queue: [queueItem()],
+      profiles: {
+        "user-1": profile({
+          notification_preferences: { push: true, sms: true, email: true, digest_only: false },
+        }),
+      },
+    });
+
+    const body = await (await POST(cronRequest())).json();
+    expect(body.sent).toBe(1);
+
+    expect(mockSendPushNotification).toHaveBeenCalledWith(
+      { endpoint: "https://push.example.com/a", keys: { p256dh: "pk", auth: "ak" } },
+      expect.objectContaining({ title: "1 game decided" })
+    );
+    expect(mockSendSMS).toHaveBeenCalledWith(
+      "+15551234567",
+      "1 game decided: Duke ✓ +20 · 1 of 1 right today"
+    );
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      "user@example.com",
+      "1 game decided",
+      "Duke ✓ +20 · 1 of 1 right today"
+    );
+
+    const logs = client.inserts("notifications_log");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].args[0]).toMatchObject({ user_id: "user-1", channel: "push" });
+  });
+
+  it("pushes to every device and deletes only the stale endpoint", async () => {
+    mockSendPushNotification.mockImplementation(async (s: { endpoint: string }) =>
+      s.endpoint !== "https://push.example.com/gone"
+    );
+    setup({
+      queue: [queueItem()],
+      subs: [sub({ id: 1 }), sub({ id: 2, endpoint: "https://push.example.com/gone" })],
+    });
+
+    const body = await (await POST(cronRequest())).json();
+    expect(body.sent).toBe(1);
+    expect(mockSendPushNotification).toHaveBeenCalledTimes(2);
+
+    const deletes = client.calls.filter(
+      (c) => c.table === "push_subscriptions" && c.method === "delete"
+    );
+    expect(deletes).toHaveLength(1);
+    const inFilter = client.filtersAfter(deletes[0]).find((f) => f.method === "in");
+    expect(inFilter?.args).toEqual(["id", [2]]);
+  });
+
+  it("bumps attempts and keeps the item when nothing is delivered", async () => {
     mockSendPushNotification.mockResolvedValue(false);
-    mockGetPreferredChannels.mockReturnValue(["push"]);
+    setup({ queue: [queueItem({ attempts: 1 })] });
 
-    let deletedSubId: string | null = null;
+    const body = await (await POST(cronRequest())).json();
+    expect(body.skipped).toBe(1);
+    const updates = client.updates("notification_queue");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].args[0]).toEqual({ attempts: 2, sent: false });
+    expect(client.inserts("notifications_log")).toHaveLength(0);
+  });
 
-    fromImpl = (table: string) => {
-      const builder = createBuilder();
+  it("gives up after the fifth failed attempt", async () => {
+    mockSendPushNotification.mockResolvedValue(false);
+    setup({ queue: [queueItem({ attempts: 4 })] });
 
-      if (table === "notification_queue") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: queueItems }),
-          }),
-        });
-        builder.update.mockReturnValue({
-          in: vi.fn().mockResolvedValue({ data: null, error: null }),
-          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
-        });
-      }
+    await POST(cronRequest());
+    expect(client.updates("notification_queue")[0].args[0]).toEqual({ attempts: 5, sent: true });
+  });
 
-      if (table === "profiles") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: profile }),
-          }),
-        });
-      }
+  it("deep-links wager notifications to /wagers", async () => {
+    setup({
+      queue: [
+        queueItem({
+          id: "q-w",
+          type: "wager_request",
+          payload: { wager_id: "w1", challenger_name: "Alice", stakes: "Lunch" },
+        }),
+      ],
+    });
 
-      if (table === "notifications_log") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            gte: vi.fn().mockResolvedValue({ count: 0 }),
-          }),
-        });
-        builder.insert.mockResolvedValue({ data: null, error: null });
-      }
-
-      if (table === "push_subscriptions") {
-        builder.select.mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: pushSub }),
-          }),
-        });
-        builder.delete.mockReturnValue({
-          eq: vi.fn().mockImplementation((_col: string, val: string) => {
-            deletedSubId = val;
-            return Promise.resolve({ data: null, error: null });
-          }),
-        });
-      }
-
-      return builder;
-    };
-
-    const res = await POST(mockRequest({ authorization: "Bearer test-cron-secret" }));
-    expect(res.status).toBe(200);
-
-    // Push was attempted
-    expect(mockSendPushNotification).toHaveBeenCalledTimes(1);
-
-    // Stale subscription should have been deleted
-    expect(deletedSubId).toBe("sub-stale");
-
-    // Since push failed, no log entry should have been created for the push channel
-    // (the handler only logs on success)
+    await POST(cronRequest());
+    expect(mockSendPushNotification.mock.calls[0][1]).toEqual({
+      title: "New wager challenge",
+      body: "Alice challenged you: Lunch",
+      url: "/wagers",
+    });
   });
 });

@@ -54,13 +54,17 @@ export async function GET() {
   }
 
   const adminClient = createAdminClient();
-  const { data } = await adminClient
-    .from("tournament_config")
-    .select("*")
-    .eq("id", 1)
-    .maybeSingle();
+  const [{ data }, { count: queueDepth }] = await Promise.all([
+    adminClient.from("tournament_config").select("*").eq("id", 1).maybeSingle(),
+    adminClient
+      .from("notification_queue")
+      .select("id", { count: "exact", head: true })
+      .eq("sent", false),
+  ]);
 
-  return NextResponse.json(data);
+  // Queue depth rides along because RLS hides other users' queue rows from the
+  // browser client the admin page uses.
+  return NextResponse.json({ ...(data ?? {}), queue_depth: queueDepth ?? 0 });
 }
 
 export async function PUT(request: NextRequest) {

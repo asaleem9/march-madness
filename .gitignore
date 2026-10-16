@@ -50,3 +50,6 @@ next-env.d.ts
 /images/
 *.bak
 /ALI_VS_ITSWETTER.md
+
+# keep the example env file
+!.env.example

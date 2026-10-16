@@ -1,15 +1,49 @@
+import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
+import { getTournamentConfig, isPastDeadline, getScoringMultipliers } from "@/lib/tournament";
 import type { GameWithTeams, Region } from "@/types";
 
 interface Props {
   params: Promise<{ id: string }>;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function fetchBracketSummary(id: string) {
+  if (!UUID_RE.test(id)) return null;
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("brackets")
+    .select("id, name, score, locked, user_id, updated_at, profiles(display_name)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!data) return null;
+  const profile = data.profiles as unknown as { display_name: string | null } | { display_name: string | null }[] | null;
+  const ownerName = Array.isArray(profile) ? profile[0]?.display_name ?? null : profile?.display_name ?? null;
+  return { ...data, ownerName };
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const bracket = await fetchBracketSummary(id);
+  if (!bracket) return { title: "Bracket not found" };
+  const owner = bracket.ownerName ?? "Someone";
+  const title = `${owner}'s bracket · ${bracket.score ?? 0} pts`;
+  const description = `${bracket.name} — ${bracket.score ?? 0} points so far. See every pick and follow along live.`;
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary_large_image", title, description },
+  };
+}
+
 export default async function BracketPage({ params }: Props) {
   const { id } = await params;
+  if (!UUID_RE.test(id)) notFound();
 
   // Use admin client for reads so unauthenticated users can view brackets
   const adminSupabase = createAdminClient();
@@ -20,37 +54,35 @@ export default async function BracketPage({ params }: Props) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Fetch the bracket
-  const { data: bracket } = await adminSupabase
-    .from("brackets")
-    .select("*")
-    .eq("id", id)
-    .single();
-
+  const [{ data: bracket, error: bracketError }, config] = await Promise.all([
+    adminSupabase.from("brackets").select("*").eq("id", id).maybeSingle(),
+    getTournamentConfig(),
+  ]);
+  if (bracketError) throw new Error(`Failed to load bracket: ${bracketError.message}`);
   if (!bracket) notFound();
 
   const isOwner = !!user && bracket.user_id === user.id;
+  const pastDeadline = isPastDeadline(config);
+  const multipliers = getScoringMultipliers(config);
 
-  // Fetch bracket picks
-  const { data: picks } = await adminSupabase
-    .from("bracket_picks")
-    .select("*")
-    .eq("bracket_id", id);
-
-  const isLocked = bracket.locked;
-
-  // Fetch all games with teams
-  const { data: games } = await adminSupabase
-    .from("games")
-    .select(
-      `
-      *,
-      team_a:teams!team_a_id(*),
-      team_b:teams!team_b_id(*),
-      winner:teams!winner_id(*)
-    `
-    )
-    .order("game_slot");
+  const [{ data: picks, error: picksError }, { data: games, error: gamesError }, { data: profile }] =
+    await Promise.all([
+      adminSupabase.from("bracket_picks").select("*").eq("bracket_id", id),
+      adminSupabase
+        .from("games")
+        .select(
+          `
+          *,
+          team_a:teams!team_a_id(*),
+          team_b:teams!team_b_id(*),
+          winner:teams!winner_id(*)
+        `
+        )
+        .order("game_slot"),
+      adminSupabase.from("profiles").select("display_name").eq("id", bracket.user_id).maybeSingle(),
+    ]);
+  if (picksError) throw new Error(`Failed to load picks: ${picksError.message}`);
+  if (gamesError) throw new Error(`Failed to load games: ${gamesError.message}`);
 
   function mapTeam(t: Record<string, unknown> | null) {
     if (!t) return null;
@@ -91,6 +123,8 @@ export default async function BracketPage({ params }: Props) {
     gameSlot: p.game_slot,
     round: p.round,
     pickedTeamId: p.picked_team_id,
+    pointsEarned: p.points_earned ?? 0,
+    isCorrect: p.is_correct ?? null,
   }));
 
   return (
@@ -100,9 +134,15 @@ export default async function BracketPage({ params }: Props) {
         bracketId={id}
         existingPicks={existingPicks}
         existingName={bracket.name}
-        isLocked={isLocked}
+        isLocked={bracket.locked || pastDeadline}
+        finalized={!!bracket.locked}
+        deadlinePassed={pastDeadline}
         isOwner={isOwner}
         score={bracket.score || 0}
+        ownerName={profile?.display_name ?? null}
+        userId={user?.id ?? null}
+        serverUpdatedAt={bracket.updated_at ?? null}
+        multipliers={multipliers}
       />
     </div>
   );

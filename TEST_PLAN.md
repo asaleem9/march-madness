@@ -2,7 +2,7 @@
 
 This document defines the full test suite for the March Madness Bracket Challenge app. Tests are organized by layer (unit, integration, API, database, E2E) and module. Each test case includes the scenario, expected behavior, and relevant source file references.
 
-**Test Framework**: Vitest (unit/integration) + Playwright (E2E) + Supabase local dev (database)
+**Test Framework**: Vitest (unit/integration; `createRecordingClient` in `src/test/helpers.ts` mocks Supabase) + Playwright (E2E) + Supabase local dev (database)
 
 ---
 
@@ -523,28 +523,27 @@ Test these against the Supabase local dev instance with actual JWT-authenticated
 | 19 | tournament_config: SELECT for all, no user mutations | Verify |
 | 20 | Bracket UPDATE denied after deadline passes | RLS check on server timestamp |
 
-### 3.3 Seed Script Validation
+### 3.3 Tournament Structure & Bracket Import
 
-**File**: `src/db/seed.ts`
+**Files under test**: `src/lib/tournament-structure.ts`, `src/lib/bracket-import.ts`, `src/lib/lock-brackets.ts`, `src/lib/process-final-game.ts`, `src/lib/achievements.ts`
 
 | # | Test Case | Expected |
 |---|-----------|----------|
-| 1 | 72 teams inserted (68 unique + 4 First Four play-in pairs share seeds) | Verify count |
-| 2 | Each region has correct number of standard teams | 16 per region (some shared seeds for First Four) |
-| 3 | All 4 First Four matchups have correct team pairings | Slot 1: Howard vs UMBC, Slot 2: Lehigh vs PVAM, Slot 3: Texas vs NC State, Slot 4: SMU vs Miami Ohio |
-| 4 | 67 game slots created (4 First Four + 32 First Round + 16 Second Round + 8 Sweet 16 + 4 Elite Eight + 2 Final Four + 1 Championship) | Verify count |
-| 5 | First Round matchups follow standard seeding (1v16, 8v9, 5v12, 4v13, 6v11, 3v14, 7v10, 2v15) | Verify team_a/team_b for each |
-| 6 | All next_game_slot references are valid | Every non-null next_game_slot points to an existing game_slot |
-| 7 | Championship game has next_game_slot = null | Slot 67 |
-| 8 | Final Four games both point to championship (slot 67) | Slots 65, 66 → 67 |
-| 9 | slot_position alternates correctly within connected games | Top/bottom for each pair feeding the same next game |
-| 10 | tournament_config has correct defaults | Year 2026, deadlines set, default scoring multipliers |
-| 11 | First Four games connect to correct First Round games | Slot 1→5, Slot 2→6, Slot 3→17, Slot 4→21 |
-| 12 | First Four teams NOT assigned to regular First Round games | Teams with record "First Four" excluded from standard seeding |
-| 13 | No duplicate game_slot values | Unique constraint validated |
-| 14 | Re-running seed fails gracefully (unique constraint violations) | Does not corrupt existing data |
-
----
+| 1 | `buildGameSlots` produces 75 unique slots in order | slots 1..75 |
+| 2 | Round counts | 12 opening / 32 R1 / 16 R2 / 8 S16 / 4 E8 / 2 F4 / 1 championship |
+| 3 | Every R2+ slot is fed by exactly one top and one bottom game | tree is complete |
+| 4 | Opening-round rows are unwired until import | region/next/pos null |
+| 5 | `r1SlotFor(region, seed)` / `positionFor(seed)` tables | e.g. east/1→13 top, west/11→25 bottom |
+| 6 | `eliteEightTarget` follows the Final Four pairing | pairing[0] → 73, pairing[1] → 74 |
+| 7 | 2026 ESPN fixtures replay through the importer | 68 teams, 4 play-ins, 32 R1, full seed coverage, 0 errors |
+| 8 | Play-in feeds the matching R1 slot/side | West 11 → slot 25 bottom |
+| 9 | Synthetic 2027 board: "Opening Round" headline + TBD side | links to the 5-seed's game; NIT ignored |
+| 10 | Headline without a round infers from seeds; missing seed warns | play-in detected / warning |
+| 11 | Name collisions are suffixed with the abbreviation | "Miami (M-OH)" |
+| 12 | `lockBracketsPastDeadline` locks only complete drafts after the deadline | ignores first_four picks |
+| 13 | `processFinalGame` eliminates, advances, re-scores changed picks, recalculates, notifies once | idempotent |
+| 14 | Play-in loser's picks rewrite to the winner in every round | no game_slot filter |
+| 15 | `evaluateAchievements` awards the five badges correctly | drafts ineligible |
 
 ## 4. Middleware Tests
 

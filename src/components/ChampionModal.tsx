@@ -1,25 +1,89 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 
-export function ChampionModal() {
+export interface ChampionModalTeam {
+  name: string;
+  logoUrl: string | null;
+  score: number | null;
+}
+
+export interface ChampionModalProps {
+  /** Tournament year that just finished. */
+  year: number;
+  /** Year the waitlist signs people up for. */
+  nextYear: number;
+  champion: ChampionModalTeam;
+  runnerUp: ChampionModalTeam | null;
+}
+
+function storageKey(year: number) {
+  return `champ-modal-${year}`;
+}
+
+function readDismissed(year: number): boolean {
+  try {
+    return window.localStorage.getItem(storageKey(year)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeDismissed(year: number) {
+  try {
+    window.localStorage.setItem(storageKey(year), "true");
+  } catch {
+    // Private mode / blocked storage — the card just shows again next visit.
+  }
+}
+
+function TeamLogo({
+  team,
+  size,
+  className = "",
+}: {
+  team: ChampionModalTeam;
+  size: number;
+  className?: string;
+}) {
+  if (!team.logoUrl) {
+    return (
+      <div
+        className={`css-basketball ${className}`}
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        <span className="css-basketball-seams" />
+      </div>
+    );
+  }
+  return (
+    <div className={`relative ${className}`} style={{ width: size, height: size }}>
+      <Image src={team.logoUrl} alt={team.name} fill className="object-contain" unoptimized />
+    </div>
+  );
+}
+
+/**
+ * Dismissible bottom card announcing the champion and collecting waitlist
+ * emails for next year. Celebratory but non-blocking — never covers the hero.
+ */
+export function ChampionModal({ year, nextYear, champion, runnerUp }: ChampionModalProps) {
   const [visible, setVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
-  const dismiss = () => {
+  const dismiss = useCallback(() => {
     setVisible(false);
-    localStorage.setItem("champ-modal-2026", "true");
-  };
+    writeDismissed(year);
+  }, [year]);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem("champ-modal-2026");
-    if (!dismissed) {
-      const timer = setTimeout(() => setVisible(true), 1200);
-      return () => clearTimeout(timer);
-    }
-  }, []);
+    if (readDismissed(year)) return;
+    const timer = setTimeout(() => setVisible(true), 1200);
+    return () => clearTimeout(timer);
+  }, [year]);
 
   // Dismiss on Escape for keyboard users.
   useEffect(() => {
@@ -29,7 +93,7 @@ export function ChampionModal() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible]);
+  }, [visible, dismiss]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,16 +119,15 @@ export function ChampionModal() {
 
   if (!visible) return null;
 
+  const hasScores = champion.score !== null && runnerUp?.score != null;
+
   return (
-    // A dismissible bottom card — celebratory but non-blocking, so it never
-    // covers the hero or the primary CTA on load.
     <div
       role="region"
-      aria-label="2026 champion and 2027 waitlist"
+      aria-label={`${year} champion and ${nextYear} waitlist`}
       className="fixed z-40 bottom-3 inset-x-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-80 animate-in"
     >
       <div className="relative bg-cream border-4 border-gold rounded overflow-hidden shadow-[6px_6px_0_rgba(0,0,0,0.3)]">
-        {/* Close button */}
         <button
           onClick={dismiss}
           className="absolute top-2 right-2 z-20 w-7 h-7 flex items-center justify-center rounded-full bg-navy-light/70 border border-gold/40 text-cream hover:bg-burnt-orange hover:border-burnt-orange transition-colors"
@@ -86,37 +149,35 @@ export function ChampionModal() {
         {/* Champion header */}
         <div className="relative bg-navy py-5 px-4 text-center overflow-hidden">
           <div className="flex items-center justify-center gap-3 mb-3">
-            <div className="relative w-12 h-12 champ-logo-glow">
-              <Image
-                src="https://a.espncdn.com/i/teamlogos/ncaa/500/130.png"
-                alt="Michigan Wolverines"
-                fill
-                className="object-contain"
-                unoptimized
-              />
-            </div>
-            <div className="flex flex-col items-center leading-none">
-              <span className="font-display text-cream text-xs">69</span>
-              <span className="font-body text-cream/40 text-[0.5rem] my-0.5">vs</span>
-              <span className="font-display text-cream/50 text-xs">63</span>
-            </div>
-            <div className="relative w-9 h-9 opacity-50">
-              <Image
-                src="https://a.espncdn.com/i/teamlogos/ncaa/500/41.png"
-                alt="UConn Huskies"
-                fill
-                className="object-contain"
-                unoptimized
-              />
-            </div>
+            <TeamLogo team={champion} size={48} className="champ-logo-glow" />
+            {runnerUp && (
+              <>
+                <div className="flex flex-col items-center leading-none">
+                  {hasScores ? (
+                    <>
+                      <span className="font-display text-cream text-xs">{champion.score}</span>
+                      <span className="font-body text-cream/40 text-[0.6rem] my-0.5">vs</span>
+                      <span className="font-display text-cream/50 text-xs">{runnerUp.score}</span>
+                    </>
+                  ) : (
+                    <span className="font-body text-cream/40 text-xs">def.</span>
+                  )}
+                </div>
+                <TeamLogo team={runnerUp} size={36} className="opacity-50" />
+              </>
+            )}
           </div>
           <div className="flex items-center justify-center gap-2">
-            <span className="text-lg champ-trophy-bounce">🏆</span>
-            <h2 className="font-display text-gold text-base champ-title-glow">MICHIGAN</h2>
-            <span className="text-lg champ-trophy-bounce" style={{ animationDelay: "0.15s" }}>🏆</span>
+            <span className="text-lg champ-trophy-bounce" aria-hidden="true">🏆</span>
+            <h2 className="font-display text-gold text-xs sm:text-sm champ-title-glow uppercase break-words">
+              {champion.name}
+            </h2>
+            <span className="text-lg champ-trophy-bounce" style={{ animationDelay: "0.15s" }} aria-hidden="true">
+              🏆
+            </span>
           </div>
-          <p className="font-display text-burnt-orange text-[0.55rem] tracking-wider mt-1">
-            2026 NCAA CHAMPIONS
+          <p className="font-display text-burnt-orange text-[0.6rem] tracking-wider mt-2">
+            {year} NCAA CHAMPIONS
           </p>
         </div>
 
@@ -126,13 +187,13 @@ export function ChampionModal() {
             <div className="text-center py-1">
               <p className="font-display text-forest text-[0.6rem] mb-1">YOU&apos;RE IN!</p>
               <p className="font-body text-navy/70 text-xs">
-                We&apos;ll let you know when 2027 brackets open.
+                We&apos;ll let you know when {nextYear} brackets open.
               </p>
             </div>
           ) : (
             <>
               <p className="font-body text-navy/70 text-xs text-center mb-3">
-                Get notified when brackets open for 2027.
+                Get notified when brackets open for {nextYear}.
               </p>
               <form onSubmit={handleSubmit} className="flex gap-2">
                 <label htmlFor="champ-email" className="sr-only">
@@ -151,7 +212,7 @@ export function ChampionModal() {
                 <button
                   type="submit"
                   disabled={status === "loading"}
-                  className="retro-btn retro-btn-primary text-[0.5rem] whitespace-nowrap disabled:opacity-50"
+                  className="retro-btn retro-btn-primary text-[0.6rem] whitespace-nowrap disabled:opacity-50"
                 >
                   {status === "loading" ? "..." : "Notify Me"}
                 </button>

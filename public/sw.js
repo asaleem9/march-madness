@@ -7,8 +7,8 @@ self.addEventListener("push", function (event) {
 
   const options = {
     body: data.body || "You have a new update!",
-    icon: "/images/logo.png",
-    badge: "/images/logo.png",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/badge-96.png",
     vibrate: [100, 50, 100],
     data: {
       url: data.url || "/dashboard",

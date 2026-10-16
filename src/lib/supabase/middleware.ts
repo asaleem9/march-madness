@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { safeRedirectPath } from "@/lib/utils";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -64,8 +65,12 @@ export async function updateSession(request: NextRequest) {
   );
 
   if (isAuthRoute && user) {
+    // Honour a validated ?redirect= (e.g. a user who logged in in another tab
+    // and then opened /login?redirect=/wagers) instead of always sending them
+    // to the dashboard.
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = safeRedirectPath(request.nextUrl.searchParams.get("redirect"));
+    url.search = "";
     const redirectResponse = NextResponse.redirect(url);
     // Carry refreshed session cookies into the redirect
     supabaseResponse.cookies.getAll().forEach((cookie) => {

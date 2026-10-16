@@ -131,6 +131,46 @@ export async function sendEmail(
   }
 }
 
+/**
+ * The UTC instant at which "today" started in the user's timezone — used so
+ * the daily caps roll over at the user's midnight, not the server's. Falls
+ * back to UTC midnight for an unknown zone.
+ */
+export function startOfTodayIn(timezone: string | null | undefined, now: Date = new Date()): Date {
+  const utcMidnight = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  if (!timezone) return utcMidnight;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+    const get = (type: string) =>
+      parseInt(parts.find((p) => p.type === type)?.value ?? "", 10);
+    const y = get("year");
+    const mo = get("month");
+    const d = get("day");
+    const h = get("hour") % 24;
+    const mi = get("minute");
+    const sec = get("second");
+    if ([y, mo, d, h, mi, sec].some(Number.isNaN)) return utcMidnight;
+    // Wall-clock "now" in the zone, read as if it were UTC, minus real now =
+    // the zone's current offset.
+    const wallNow = Date.UTC(y, mo - 1, d, h, mi, sec);
+    const offsetMs = Math.round((wallNow - now.getTime()) / 60_000) * 60_000;
+    return new Date(Date.UTC(y, mo - 1, d) - offsetMs);
+  } catch {
+    return utcMidnight;
+  }
+}
+
 export function isInQuietHours(timezone: string): boolean {
   try {
     // Read the hour directly in the target timezone. Re-parsing a formatted
@@ -150,14 +190,23 @@ export function isInQuietHours(timezone: string): boolean {
   }
 }
 
-export function getPreferredChannels(preferences: {
-  push: boolean;
-  sms: boolean;
-  email: boolean;
-}): NotificationChannel[] {
+/**
+ * Channels the user opted into, in send order. An empty array means the user
+ * turned everything off — send-batch treats that as opted out (nothing is
+ * delivered and the queue items are discarded).
+ */
+export function getPreferredChannels(
+  preferences: {
+    push?: boolean;
+    sms?: boolean;
+    email?: boolean;
+  } | null | undefined
+): NotificationChannel[] {
+  // No preferences row yet (brand-new profile): push is the default.
+  if (!preferences) return ["push"];
   const channels: NotificationChannel[] = [];
   if (preferences.push) channels.push("push");
   if (preferences.sms) channels.push("sms");
   if (preferences.email) channels.push("email");
-  return channels.length > 0 ? channels : ["push"];
+  return channels;
 }

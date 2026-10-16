@@ -15,11 +15,13 @@ vi.mock("next/navigation", () => ({
 
 const mockSignInWithPassword = vi.fn();
 const mockSignInWithOAuth = vi.fn();
+const mockResend = vi.fn();
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: {
       signInWithPassword: mockSignInWithPassword,
       signInWithOAuth: mockSignInWithOAuth,
+      resend: mockResend,
     },
   }),
 }));
@@ -66,9 +68,11 @@ describe("LoginPage", () => {
     vi.clearAllMocks();
     mockSignInWithPassword.mockResolvedValue({ error: null });
     mockSignInWithOAuth.mockResolvedValue({ error: null });
+    mockResend.mockResolvedValue({ error: null });
 
-    // Reset search params to default (no redirect param)
+    // Reset search params to default (no redirect / error param)
     mockSearchParams.delete("redirect");
+    mockSearchParams.delete("error");
   });
 
   it("renders email and password form fields", () => {
@@ -164,5 +168,91 @@ describe("LoginPage", () => {
         },
       });
     });
+  });
+
+  it("links every input to a label and links to forgot-password", () => {
+    render(<LoginPage />);
+
+    expect(screen.getByLabelText("EMAIL")).toHaveAttribute("id", "login-email");
+    expect(screen.getByLabelText("PASSWORD")).toHaveAttribute("id", "login-password");
+    expect(screen.getByRole("link", { name: /forgot password/i })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+  });
+
+  it("toggles password visibility with an aria-pressed button", () => {
+    render(<LoginPage />);
+    const input = screen.getByPlaceholderText("Enter your password");
+    const toggle = screen.getByRole("button", { name: /show password/i });
+
+    expect(input).toHaveAttribute("type", "password");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle);
+
+    expect(input).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: /hide password/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("shows the Google failure message from ?error=auth_failed", () => {
+    mockSearchParams.set("error", "auth_failed");
+
+    render(<LoginPage />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Google sign-in failed — try again",
+    );
+  });
+
+  it("disables the Google button while redirecting and surfaces OAuth errors", async () => {
+    mockSignInWithOAuth.mockResolvedValue({
+      error: { message: "Provider is not enabled" },
+    });
+
+    render(<LoginPage />);
+    const google = screen.getByRole("button", { name: /sign in with google/i });
+    fireEvent.click(google);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Provider is not enabled");
+    });
+    // Re-enabled after the failure so the user can retry.
+    expect(screen.getByRole("button", { name: /sign in with google/i })).not.toBeDisabled();
+  });
+
+  it("offers to resend the confirmation email when the account is not confirmed", async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      error: { message: "Email not confirmed" },
+    });
+
+    render(<LoginPage />);
+    fillAndSubmit("new@test.com", "secret123");
+
+    const resend = await screen.findByRole("button", { name: /resend email/i });
+    fireEvent.click(resend);
+
+    await waitFor(() => {
+      expect(mockResend).toHaveBeenCalledWith({ type: "signup", email: "new@test.com" });
+    });
+    // Cooldown kicks in after a successful resend.
+    expect(
+      await screen.findByRole("button", { name: /resend in 60s/i }),
+    ).toBeDisabled();
+  });
+
+  it("does not show the resend button for other login errors", async () => {
+    mockSignInWithPassword.mockResolvedValue({
+      error: { message: "Invalid login credentials" },
+    });
+
+    render(<LoginPage />);
+    fillAndSubmit("user@test.com", "wrong");
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: /resend/i })).not.toBeInTheDocument();
   });
 });

@@ -214,6 +214,7 @@ describe("GET /api/cron/update-scores", () => {
         return null;
       }
       if (table === "wagers") return [{ id: "w1", status: "accepted", challenger_id: "u1", opponent_id: "u2", challenger_bracket_id: "cb", opponent_bracket_id: "ob", stakes: "dinner" }];
+      if (table === "profiles") return [{ id: "u1", display_name: "Ali" }, { id: "u2", display_name: "Sam" }];
       if (table === "brackets") {
         const eq = chain.find((c) => c.method === "eq" && c.args[0] === "id");
         return eq ? brackets[eq.args[1] as string] : null;
@@ -227,6 +228,7 @@ describe("GET /api/cron/update-scores", () => {
     expect(upd.args[0]).toMatchObject({ status: "resolved", winner_id: null });
     const queued = client.inserts("notification_queue")[0].args[0] as Record<string, unknown>[];
     expect(queued).toHaveLength(2);
-    expect(queued[0].payload).toMatchObject({ tie: true, won: false, stakes: "dinner", your_score: 300 });
+    expect(queued[0].payload).toMatchObject({ tie: true, won: false, stakes: "dinner", your_score: 300, opponent_name: "Sam" });
+    expect(queued[1].payload).toMatchObject({ opponent_name: "Ali" });
   });
 });

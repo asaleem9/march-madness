@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { isInQuietHours, getPreferredChannels } from "../notifications";
+import { isInQuietHours, getPreferredChannels, startOfTodayIn } from "../notifications";
 
 describe("isInQuietHours", () => {
   it("returns true during late night (11pm)", () => {
@@ -79,10 +79,15 @@ describe("getPreferredChannels", () => {
     ).toEqual(["push"]);
   });
 
-  it("defaults to push when no channels enabled", () => {
+  it("returns [] (opted out) when every channel is off", () => {
     expect(
       getPreferredChannels({ push: false, sms: false, email: false })
-    ).toEqual(["push"]);
+    ).toEqual([]);
+  });
+
+  it("defaults to push when the profile has no preferences yet", () => {
+    expect(getPreferredChannels(null)).toEqual(["push"]);
+    expect(getPreferredChannels(undefined)).toEqual(["push"]);
   });
 
   it("returns only SMS when only SMS enabled", () => {
@@ -108,5 +113,29 @@ describe("getPreferredChannels", () => {
     expect(result[0]).toBe("push");
     expect(result[1]).toBe("sms");
     expect(result[2]).toBe("email");
+  });
+});
+
+describe("startOfTodayIn", () => {
+  it("returns local midnight for a zone behind UTC", () => {
+    // 2026-03-19 03:00Z is 23:00 on the 18th in New York (EDT, UTC-4).
+    const now = new Date("2026-03-19T03:00:00Z");
+    expect(startOfTodayIn("America/New_York", now).toISOString()).toBe(
+      "2026-03-18T04:00:00.000Z"
+    );
+  });
+
+  it("returns local midnight for a zone ahead of UTC", () => {
+    // 2026-03-19 20:00Z is 05:00 on the 20th in Tokyo (UTC+9).
+    const now = new Date("2026-03-19T20:00:00Z");
+    expect(startOfTodayIn("Asia/Tokyo", now).toISOString()).toBe(
+      "2026-03-19T15:00:00.000Z"
+    );
+  });
+
+  it("falls back to UTC midnight for a missing or invalid zone", () => {
+    const now = new Date("2026-03-19T20:30:00Z");
+    expect(startOfTodayIn(null, now).toISOString()).toBe("2026-03-19T00:00:00.000Z");
+    expect(startOfTodayIn("Nope/Zone", now).toISOString()).toBe("2026-03-19T00:00:00.000Z");
   });
 });

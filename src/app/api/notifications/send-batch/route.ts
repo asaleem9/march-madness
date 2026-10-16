@@ -1,39 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { authorizeCronOrAdmin } from "@/lib/admin-auth";
 import {
   sendPushNotification,
   sendSMS,
   sendEmail,
   isInQuietHours,
   getPreferredChannels,
+  startOfTodayIn,
 } from "@/lib/notifications";
+import { buildBatchMessage, toSmsText } from "@/lib/notification-copy";
+import type { NotificationPreferences } from "@/types";
 
-const adminEmails = (process.env.ADMIN_EMAILS || "")
-  .split(",")
-  .map((e) => e.trim())
-  .filter(Boolean);
+/** Hard ceiling on notifications per user per local day. */
+const DAILY_CAP = 3;
+/** "Daily digest only" users get at most one per local day. */
+const DIGEST_CAP = 1;
+/** Give up on an item after this many failed delivery attempts. */
+const MAX_ATTEMPTS = 5;
 
-// Allow either the cron secret (Vercel Cron) or a signed-in admin (the manual
-// "Send Notifications" button on the admin dashboard).
-async function authorize(request: NextRequest): Promise<boolean> {
-  const authHeader = request.headers.get("authorization");
-  if (
-    process.env.CRON_SECRET &&
-    authHeader === `Bearer ${process.env.CRON_SECRET}`
-  ) {
-    return true;
-  }
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return !!user?.email && adminEmails.includes(user.email);
-}
-
-// Vercel Cron invokes endpoints with GET, so expose both. Both require the
-// CRON_SECRET bearer token (Vercel injects it automatically when the env var
-// is set).
+// Vercel Cron invokes endpoints with GET; the admin page's button uses POST.
+// Both accept the CRON_SECRET bearer or an admin session.
 export async function GET(request: NextRequest) {
   return handleSendBatch(request);
 }
@@ -43,13 +30,12 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleSendBatch(request: NextRequest) {
-  if (!(await authorize(request))) {
+  if (!(await authorizeCronOrAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = createAdminClient();
 
-  // Fetch unsent notifications grouped by user and batch_key
   const { data: queuedItems } = await supabase
     .from("notification_queue")
     .select("*")
@@ -60,22 +46,28 @@ async function handleSendBatch(request: NextRequest) {
     return NextResponse.json({ message: "No pending notifications" });
   }
 
-  // Group by user_id + batch_key
-  const batches = new Map<string, typeof queuedItems>();
+  // One message per user: everything pending for them goes into a single
+  // notification (the copy builder lists the latest batch and summarises
+  // older ones), so items that were rate-limited yesterday don't each burn
+  // one of today's sends.
+  const byUser = new Map<string, typeof queuedItems>();
   for (const item of queuedItems) {
-    const key = `${item.user_id}:${item.batch_key || "default"}`;
-    const batch = batches.get(key) || [];
+    const batch = byUser.get(item.user_id) || [];
     batch.push(item);
-    batches.set(key, batch);
+    byUser.set(item.user_id, batch);
   }
 
   let sent = 0;
   let skipped = 0;
+  let discarded = 0;
 
-  for (const [key, items] of batches) {
-    const userId = items[0].user_id;
+  const markSent = async (ids: Array<string | number>) => {
+    await supabase.from("notification_queue").update({ sent: true }).in("id", ids);
+  };
 
-    // Fetch user profile for notification preferences
+  for (const [userId, items] of byUser) {
+    const itemIds = items.map((i) => i.id);
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("*")
@@ -84,54 +76,43 @@ async function handleSendBatch(request: NextRequest) {
 
     if (!profile) continue;
 
-    // Check quiet hours
+    const prefs = (profile.notification_preferences as NotificationPreferences | null) ?? null;
+    const channels = getPreferredChannels(prefs);
+
+    // Every channel off = opted out. Nothing to deliver; drop the items so the
+    // queue doesn't grow forever.
+    if (channels.length === 0) {
+      await markSent(itemIds);
+      discarded += items.length;
+      continue;
+    }
+
     if (profile.timezone && isInQuietHours(profile.timezone)) {
       skipped += items.length;
       continue;
     }
 
-    // Check daily rate limit (max 3 per day)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Daily cap, measured from the user's local midnight.
+    const dayStart = startOfTodayIn(profile.timezone);
     const { count } = await supabase
       .from("notifications_log")
       .select("*", { count: "exact", head: true })
       .eq("user_id", userId)
-      .gte("sent_at", today.toISOString());
+      .gte("sent_at", dayStart.toISOString());
 
-    if ((count || 0) >= 3) {
+    const cap = prefs?.digest_only ? DIGEST_CAP : DAILY_CAP;
+    if ((count || 0) >= cap) {
       skipped += items.length;
       continue;
     }
 
-    // Build consolidated message
-    const gameResults = items.filter((i) => i.type === "game_result");
-    const wagerNotifs = items.filter(
-      (i) => i.type === "wager_request" || i.type === "wager_result"
-    );
-
-    let message = "";
-    if (gameResults.length > 0) {
-      message = `${gameResults.length} game(s) decided. Check your bracket for updates!`;
-    }
-    if (wagerNotifs.length > 0) {
-      message += message ? " " : "";
-      message += `You have ${wagerNotifs.length} wager update(s).`;
+    const message = buildBatchMessage(items);
+    if (!message) {
+      await markSent(itemIds);
+      discarded += items.length;
+      continue;
     }
 
-    if (!message) continue;
-
-    // Get preferred channels
-    const prefs = (profile.notification_preferences as {
-      push: boolean;
-      sms: boolean;
-      email: boolean;
-      digest_only: boolean;
-    }) || { push: true, sms: false, email: false, digest_only: false };
-
-    const channels = getPreferredChannels(prefs);
-
-    // Send via each channel, tracking whether anything was delivered.
     let anySuccess = false;
     let deliveredChannel: string | null = null;
 
@@ -139,42 +120,33 @@ async function handleSendBatch(request: NextRequest) {
       let success = false;
 
       if (channel === "push") {
-        const { data: sub } = await supabase
+        // Every device the user registered (phone + laptop).
+        const { data: subs } = await supabase
           .from("push_subscriptions")
           .select("*")
-          .eq("user_id", userId)
-          .single();
+          .eq("user_id", userId);
 
-        if (sub) {
-          success = await sendPushNotification(
+        const stale: Array<string | number> = [];
+        for (const sub of subs ?? []) {
+          const ok = await sendPushNotification(
             { endpoint: sub.endpoint, keys: sub.keys as { p256dh: string; auth: string } },
-            {
-              title: "March Madness Update",
-              body: message,
-              url: "/dashboard",
-            }
+            { title: message.title, body: message.body, url: message.url }
           );
-
-          // Clean up stale subscription
-          if (!success) {
-            await supabase
-              .from("push_subscriptions")
-              .delete()
-              .eq("id", sub.id);
-          }
+          if (ok) success = true;
+          else stale.push(sub.id);
+        }
+        // Only the endpoints that bounced are removed.
+        if (stale.length > 0) {
+          await supabase.from("push_subscriptions").delete().in("id", stale);
         }
       } else if (channel === "sms" && profile.phone) {
-        success = await sendSMS(profile.phone, message);
+        success = await sendSMS(profile.phone, toSmsText(message));
       } else if (channel === "email") {
         const {
           data: { user },
         } = await supabase.auth.admin.getUserById(userId);
         if (user?.email) {
-          success = await sendEmail(
-            user.email,
-            "March Madness Update",
-            message
-          );
+          success = await sendEmail(user.email, message.title, message.body);
         }
       }
 
@@ -184,28 +156,20 @@ async function handleSendBatch(request: NextRequest) {
       }
     }
 
-    const itemIds = items.map((i) => i.id);
-
     if (anySuccess) {
-      // Log one entry per delivered notification (not per channel) so the daily
-      // cap means "3 notifications", not "3 channel-sends".
+      // One log row per delivered notification (not per channel) so the daily
+      // cap counts notifications.
       await supabase.from("notifications_log").insert({
         user_id: userId,
-        message,
+        message: toSmsText(message),
         channel: deliveredChannel,
       });
 
-      // Only clear the queue once something was actually delivered.
-      await supabase
-        .from("notification_queue")
-        .update({ sent: true })
-        .in("id", itemIds);
-
+      await markSent(itemIds);
       sent += items.length;
     } else {
-      // Nothing delivered — bump attempts and retry next run, but give up after
-      // MAX_ATTEMPTS so a permanently-undeliverable item doesn't loop forever.
-      const MAX_ATTEMPTS = 5;
+      // Nothing delivered — bump attempts and retry next run, giving up after
+      // MAX_ATTEMPTS so an undeliverable item doesn't loop forever.
       for (const item of items) {
         const attempts = ((item.attempts as number) ?? 0) + 1;
         await supabase
@@ -221,6 +185,7 @@ async function handleSendBatch(request: NextRequest) {
     message: "Batch processed",
     sent,
     skipped,
+    discarded,
     timestamp: new Date().toISOString(),
   });
 }

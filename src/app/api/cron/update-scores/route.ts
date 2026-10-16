@@ -236,6 +236,14 @@ async function resolveCompletedWagers(
   let resolved = 0;
   const nowIso = new Date().toISOString();
 
+  // Display names for the notification copy ("You beat Ali: loser buys dinner").
+  const userIds = [...new Set(wagers.flatMap((w) => [w.challenger_id, w.opponent_id]))];
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, display_name")
+    .in("id", userIds);
+  const nameOf = new Map((profiles ?? []).map((p) => [p.id, p.display_name as string | null]));
+
   for (const wager of wagers) {
     const { data: challengerBracket } = await supabase
       .from("brackets")
@@ -284,6 +292,7 @@ async function resolveCompletedWagers(
           wager_id: wager.id,
           stakes: wager.stakes,
           opponent_id: wager.opponent_id,
+          opponent_name: nameOf.get(wager.opponent_id) ?? null,
           your_score: challengerScore,
           their_score: opponentScore,
           won: winnerId === wager.challenger_id,
@@ -297,6 +306,7 @@ async function resolveCompletedWagers(
           wager_id: wager.id,
           stakes: wager.stakes,
           opponent_id: wager.challenger_id,
+          opponent_name: nameOf.get(wager.challenger_id) ?? null,
           your_score: opponentScore,
           their_score: challengerScore,
           won: winnerId === wager.opponent_id,

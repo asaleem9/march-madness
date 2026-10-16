@@ -230,6 +230,27 @@ describe("updateSession", () => {
       const redirectUrl = (NextResponse.redirect as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
       expect(redirectUrl.pathname).toBe("/dashboard");
     });
+
+    it("honours a safe ?redirect= on /login", async () => {
+      mockAuthenticated();
+      const request = createMockRequest("/login?redirect=%2Fwagers");
+      const response = await updateSession(request);
+
+      expect(response.type).toBe("redirect");
+      const redirectUrl = (NextResponse.redirect as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
+      expect(redirectUrl.pathname).toBe("/wagers");
+      expect(redirectUrl.search).toBe("");
+    });
+
+    it("falls back to /dashboard for an unsafe ?redirect= on /signup", async () => {
+      mockAuthenticated();
+      const request = createMockRequest("/signup?redirect=https%3A%2F%2Fevil.com");
+      const response = await updateSession(request);
+
+      expect(response.type).toBe("redirect");
+      const redirectUrl = (NextResponse.redirect as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
+      expect(redirectUrl.pathname).toBe("/dashboard");
+    });
   });
 
   describe("cookie propagation", () => {

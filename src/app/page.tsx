@@ -1,12 +1,112 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import FeatureIcon from "@/components/FeatureIcon";
 import SectionDivider from "@/components/SectionDivider";
 import { ChampionModal } from "@/components/ChampionModal";
+import { LockCountdown } from "@/components/LockCountdown";
+import { createClient } from "@/lib/supabase/server";
+import {
+  getChampion,
+  getEffectivePhase,
+  getScoringMultipliers,
+  getTournamentConfig,
+} from "@/lib/tournament";
+import { REQUIRED_PICKS } from "@/lib/tournament-structure";
+import type { TournamentPhase } from "@/types";
 
-export default function HomePage() {
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await getTournamentConfig();
+  const year = config?.year ?? new Date().getFullYear();
+  return {
+    title: { absolute: `March Madness ${year} Bracket Challenge` },
+    description: `Fill out your ${year} bracket, climb the leaderboard, and wager with friends.`,
+  };
+}
+
+interface Cta {
+  href: string;
+  label: string;
+  style: "retro-btn-primary" | "retro-btn-gold" | "retro-btn-secondary";
+}
+
+function ctasFor(phase: TournamentPhase, loggedIn: boolean): Cta[] {
+  if (phase === "completed") {
+    return [
+      { href: "/leaderboard", label: "Final Standings", style: "retro-btn-gold" },
+      { href: "/schedule", label: "Results", style: "retro-btn-secondary" },
+    ];
+  }
+  if (phase === "pre_tournament") {
+    return [
+      loggedIn
+        ? { href: "/bracket/new", label: "My Bracket", style: "retro-btn-primary" }
+        : { href: "/signup", label: "Create Bracket", style: "retro-btn-primary" },
+      { href: "/leaderboard", label: "Leaderboard", style: "retro-btn-gold" },
+      { href: "/schedule", label: "Live Scores", style: "retro-btn-secondary" },
+    ];
+  }
+  return [
+    loggedIn
+      ? { href: "/dashboard", label: "My Bracket", style: "retro-btn-primary" }
+      : { href: "/signup", label: "Sign Up", style: "retro-btn-primary" },
+    { href: "/leaderboard", label: "Leaderboard", style: "retro-btn-gold" },
+    { href: "/schedule", label: "Live Scores", style: "retro-btn-secondary" },
+  ];
+}
+
+function stepOneCopy(phase: TournamentPhase, year: number): string {
+  if (phase === "completed")
+    return `The ${year} tournament is in the books. Brackets reopen for ${year + 1} — join the waitlist to hear when.`;
+  if (phase !== "pre_tournament")
+    return `Brackets are locked for ${year}. Follow your ${REQUIRED_PICKS} picks as the rounds play out and watch the upsets pay off.`;
+  return `Fill out your bracket with all ${REQUIRED_PICKS} picks before the First Round tips off. Pick upsets for bonus points.`;
+}
+
+export default async function HomePage() {
+  const supabase = await createClient();
+  const [config, champion, userRes] = await Promise.all([
+    getTournamentConfig(),
+    getChampion(),
+    supabase.auth.getUser(),
+  ]);
+  const loggedIn = !!userRes.data.user;
+  const year = config?.year ?? new Date().getFullYear();
+  const phase = getEffectivePhase(config, !!champion);
+  const multipliers = getScoringMultipliers(config);
+  const ctas = ctasFor(phase, loggedIn);
+
+  const scoringStrip = [
+    { round: "R1", points: multipliers.first_round },
+    { round: "R2", points: multipliers.second_round },
+    { round: "S16", points: multipliers.sweet_16 },
+    { round: "E8", points: multipliers.elite_eight },
+    { round: "F4", points: multipliers.final_four },
+    { round: "CHAMP", points: multipliers.championship },
+  ];
+
   return (
     <div className="min-h-[calc(100vh-8rem)]">
-      <ChampionModal />
+      {phase === "completed" && champion && (
+        <ChampionModal
+          year={year}
+          nextYear={year + 1}
+          champion={{
+            name: champion.winner.name,
+            logoUrl: champion.winner.logoUrl,
+            score: champion.winnerScore,
+          }}
+          runnerUp={
+            champion.runnerUp
+              ? {
+                  name: champion.runnerUp.name,
+                  logoUrl: champion.runnerUp.logoUrl,
+                  score: champion.loserScore,
+                }
+              : null
+          }
+        />
+      )}
+
       {/* Hero Section */}
       <section className="relative overflow-hidden bg-navy py-12 sm:py-20">
         <div className="absolute inset-0 crt-effect" />
@@ -72,7 +172,7 @@ export default function HomePage() {
               <br />
               MADNESS
               <br />
-              <span className="text-burnt-orange">2026</span>
+              <span className="text-burnt-orange">{year}</span>
             </h1>
           </div>
 
@@ -83,6 +183,7 @@ export default function HomePage() {
               className="w-64 sm:w-80 h-auto"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
             >
               {/* Left side bracket lines */}
               <line x1="10" y1="8" x2="40" y2="8" stroke="#d4a843" strokeWidth="1.5" opacity="0.5" />
@@ -124,16 +225,24 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/signup" className="retro-btn retro-btn-primary">
-              Create Bracket
-            </Link>
-            <Link href="/leaderboard" className="retro-btn retro-btn-gold">
-              Leaderboard
-            </Link>
-            <Link href="/schedule" className="retro-btn retro-btn-secondary">
-              Live Scores
-            </Link>
+            {ctas.map((cta) => (
+              <Link key={cta.href} href={cta.href} className={`retro-btn ${cta.style}`}>
+                {cta.label}
+              </Link>
+            ))}
           </div>
+
+          {phase === "pre_tournament" && config?.bracket_lock_deadline && (
+            <div className="flex justify-center mt-6">
+              <LockCountdown deadline={config.bracket_lock_deadline} />
+            </div>
+          )}
+
+          {phase === "completed" && champion && (
+            <p className="font-body text-cream/70 text-xs mt-6">
+              {year} champion: <span className="text-gold font-bold">{champion.winner.name}</span>
+            </p>
+          )}
         </div>
       </section>
 
@@ -141,47 +250,36 @@ export default function HomePage() {
 
       {/* Features Section */}
       <section className="max-w-6xl mx-auto px-4 py-16">
-        <h2 className="font-display text-navy text-center text-sm mb-12">
-          HOW IT WORKS
-        </h2>
+        <h2 className="font-display text-navy text-center text-sm mb-12">HOW IT WORKS</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="retro-card p-6">
-            <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
-              STEP 1
-            </div>
+            <div className="scoreboard-heading text-center text-[0.6rem] mb-4 rounded-t">STEP 1</div>
             <FeatureIcon icon="basketball" />
-            <h3 className="font-display text-[0.65rem] text-navy mb-3">
-              Pick Your Winners
-            </h3>
-            <p className="font-body text-xs text-navy/70">
-              Fill out your bracket with all 63 picks before the First Round
-              tips off. Pick upsets for bonus points.
-            </p>
+            <h3 className="font-display text-[0.65rem] text-navy mb-3">Pick Your Winners</h3>
+            <p className="font-body text-xs text-navy/70">{stepOneCopy(phase, year)}</p>
           </div>
           <div className="retro-card p-6">
-            <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
-              STEP 2
-            </div>
+            <div className="scoreboard-heading text-center text-[0.6rem] mb-4 rounded-t">STEP 2</div>
             <FeatureIcon icon="trophy" />
-            <h3 className="font-display text-[0.65rem] text-navy mb-3">
-              Challenge Friends
-            </h3>
+            <h3 className="font-display text-[0.65rem] text-navy mb-3">Challenge Friends</h3>
             <p className="font-body text-xs text-navy/70">
-              Create IOU wagers with other players. Loser buys dinner, does a
-              dare, or whatever you agree on.
+              Create IOU wagers with other players. Loser buys dinner, does a dare, or whatever you
+              agree on.{" "}
+              <Link href="/scoring#wagers" className="text-burnt-orange hover:underline">
+                How wagers work
+              </Link>
             </p>
           </div>
           <div className="retro-card p-6">
-            <div className="scoreboard-heading text-center text-[0.55rem] mb-4 rounded-t">
-              STEP 3
-            </div>
+            <div className="scoreboard-heading text-center text-[0.6rem] mb-4 rounded-t">STEP 3</div>
             <FeatureIcon icon="chart" />
-            <h3 className="font-display text-[0.65rem] text-navy mb-3">
-              Track Live Results
-            </h3>
+            <h3 className="font-display text-[0.65rem] text-navy mb-3">Track Live Results</h3>
             <p className="font-body text-xs text-navy/70">
-              Watch your bracket update in real-time. Climb the leaderboard and
-              earn badges for epic picks.
+              Watch your bracket update in real-time. Climb the leaderboard and{" "}
+              <Link href="/scoring#badges" className="text-burnt-orange hover:underline">
+                earn badges
+              </Link>{" "}
+              for epic picks.
             </p>
           </div>
         </div>
@@ -192,36 +290,29 @@ export default function HomePage() {
       {/* Scoring Section */}
       <section className="bg-navy py-12">
         <div className="max-w-4xl mx-auto px-4">
-          <h2 className="font-display text-gold text-center text-sm mb-8">
-            SCORING
-          </h2>
+          <h2 className="font-display text-gold text-center text-sm mb-8">SCORING</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {[
-              { round: "R1", points: 10 },
-              { round: "R2", points: 20 },
-              { round: "S16", points: 40 },
-              { round: "E8", points: 80 },
-              { round: "F4", points: 160 },
-              { round: "CHAMP", points: 320 },
-            ].map((item, i) => (
+            {scoringStrip.map((item, i) => (
               <div
                 key={item.round}
                 className={`text-center py-2 ${i < 5 ? "md:border-r md:border-gold/20" : ""}`}
               >
-                <div className="font-display text-burnt-orange text-sm mb-1">
-                  {item.points}
-                </div>
-                <div className="font-display text-cream text-[0.5rem]">
-                  {item.round}
-                </div>
+                <div className="font-display text-burnt-orange text-sm mb-1">{item.points}</div>
+                <div className="font-display text-cream text-[0.6rem]">{item.round}</div>
               </div>
             ))}
           </div>
+          <p className="font-body text-cream/60 text-xs text-center mt-4">
+            Opening Round play-ins aren&apos;t picked — pick either team in the first-round tile.
+          </p>
           <div className="flex flex-col items-center mt-6 gap-3">
-            <span className="inline-block font-display text-[0.5rem] bg-burnt-orange text-cream px-4 py-2 border-2 border-burnt-orange/60 shadow-[3px_3px_0_rgba(0,0,0,0.3)]">
+            <span className="inline-block font-display text-[0.6rem] bg-burnt-orange text-cream px-4 py-2 border-2 border-burnt-orange/60 shadow-[3px_3px_0_rgba(0,0,0,0.3)]">
               UPSET PICKS EARN 1.5× BONUS
             </span>
-            <Link href="/scoring" className="font-body text-xs text-gold/70 hover:text-gold transition-colors underline underline-offset-2">
+            <Link
+              href="/scoring"
+              className="font-body text-xs text-gold/70 hover:text-gold transition-colors underline underline-offset-2"
+            >
               Full scoring details
             </Link>
           </div>

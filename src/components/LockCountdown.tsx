@@ -34,9 +34,14 @@ export function LockCountdown({ deadline, className = "", compact = false }: Pro
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
-    setNow(Date.now());
+    // First tick is deferred (not synchronous in the effect) so the server
+    // and client markup match until the component is mounted.
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
   }, []);
 
   if (now === null) return null;

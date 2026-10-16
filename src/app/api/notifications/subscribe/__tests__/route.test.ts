@@ -1,102 +1,105 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { createRecordingClient } from "@/test/helpers";
 
-// --- Mocks ---
-
-const mockGetUser = vi.fn();
-const mockUpsert = vi.fn();
+let client: ReturnType<typeof createRecordingClient>;
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({
-    auth: { getUser: mockGetUser },
-    from: vi.fn(() => ({
-      upsert: mockUpsert,
-    })),
-  })),
+  createClient: vi.fn(async () => client),
 }));
 
-// --- Import after mocks ---
+import { POST, DELETE } from "../route";
 
-import { POST } from "../route";
-
-// --- Helpers ---
-
-function createSubscriptionRequest(body: unknown) {
+function request(method: "POST" | "DELETE", body: unknown) {
   return new NextRequest("http://localhost:3000/api/notifications/subscribe", {
-    method: "POST",
+    method,
     body: JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
   });
 }
 
-// --- Tests ---
+const subscription = {
+  endpoint: "https://push.example.com/sub/456",
+  keys: { p256dh: "pubkey", auth: "authkey" },
+};
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  client = createRecordingClient();
 });
 
 describe("POST /api/notifications/subscribe", () => {
-  it("returns 401 when user is not authenticated", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: null } });
-
-    const request = createSubscriptionRequest({
-      endpoint: "https://push.example.com/sub/123",
-      keys: { p256dh: "key1", auth: "key2" },
-    });
-
-    const response = await POST(request);
-    const json = await response.json();
-
-    expect(response.status).toBe(401);
-    expect(json.error).toBe("Unauthorized");
-    expect(mockUpsert).not.toHaveBeenCalled();
+  it("returns 401 when not authenticated", async () => {
+    const res = await POST(request("POST", subscription));
+    expect(res.status).toBe(401);
+    expect(client.upserts("push_subscriptions")).toHaveLength(0);
   });
 
-  it("upserts subscription and returns success", async () => {
-    mockGetUser.mockResolvedValue({
-      data: { user: { id: "user-abc" } },
-    });
-    mockUpsert.mockResolvedValue({ error: null });
-
-    const subscription = {
-      endpoint: "https://push.example.com/sub/456",
-      keys: { p256dh: "pubkey", auth: "authkey" },
-    };
-    const request = createSubscriptionRequest(subscription);
-
-    const response = await POST(request);
-    const json = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(json.success).toBe(true);
-    expect(mockUpsert).toHaveBeenCalledWith(
-      {
-        user_id: "user-abc",
-        endpoint: "https://push.example.com/sub/456",
-        keys: { p256dh: "pubkey", auth: "authkey" },
-      },
-      { onConflict: "user_id" }
-    );
+  it("returns 400 for a malformed subscription", async () => {
+    client.auth.getUser.mockResolvedValue({ data: { user: { id: "user-abc" } } });
+    const res = await POST(request("POST", { endpoint: "x" }));
+    expect(res.status).toBe(400);
   });
 
-  it("returns 500 when database upsert fails", async () => {
-    mockGetUser.mockResolvedValue({
-      data: { user: { id: "user-abc" } },
+  it("upserts on endpoint so a user can register several devices", async () => {
+    client.auth.getUser.mockResolvedValue({ data: { user: { id: "user-abc" } } });
+
+    const res = await POST(request("POST", subscription));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+
+    const [upsert] = client.upserts("push_subscriptions");
+    expect(upsert.args).toEqual([
+      { user_id: "user-abc", endpoint: subscription.endpoint, keys: subscription.keys },
+      { onConflict: "endpoint" },
+    ]);
+  });
+
+  it("returns a sanitized 500 when the upsert fails", async () => {
+    client = createRecordingClient(() => {
+      throw new Error("boom");
     });
-    mockUpsert.mockResolvedValue({
-      error: { message: "duplicate key violates unique constraint" },
+    client.auth.getUser.mockResolvedValue({ data: { user: { id: "user-abc" } } });
+    // createRecordingClient rejects on a thrown resolver; emulate a Supabase
+    // error object instead so the route's `{ error }` branch runs.
+    client.from.mockImplementation(() => {
+      const chain: Record<string, unknown> = {};
+      chain.upsert = vi.fn(async () => ({ error: { message: "duplicate key value" } }));
+      return chain;
     });
 
-    const request = createSubscriptionRequest({
-      endpoint: "https://push.example.com/sub/789",
-      keys: { p256dh: "k1", auth: "k2" },
-    });
+    const res = await POST(request("POST", subscription));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("Something went wrong. Please try again.");
+  });
+});
 
-    const response = await POST(request);
-    const json = await response.json();
+describe("DELETE /api/notifications/subscribe", () => {
+  it("returns 401 when not authenticated", async () => {
+    const res = await DELETE(request("DELETE", { endpoint: subscription.endpoint }));
+    expect(res.status).toBe(401);
+  });
 
-    expect(response.status).toBe(500);
-    expect(json.error).toBe("Something went wrong. Please try again.");
+  it("returns 400 without an endpoint", async () => {
+    client.auth.getUser.mockResolvedValue({ data: { user: { id: "user-abc" } } });
+    const res = await DELETE(request("DELETE", {}));
+    expect(res.status).toBe(400);
+  });
+
+  it("deletes the user's row for that endpoint", async () => {
+    client.auth.getUser.mockResolvedValue({ data: { user: { id: "user-abc" } } });
+
+    const res = await DELETE(request("DELETE", { endpoint: subscription.endpoint }));
+    expect(res.status).toBe(200);
+
+    const del = client.calls.find(
+      (c) => c.table === "push_subscriptions" && c.method === "delete"
+    )!;
+    expect(del).toBeDefined();
+    const filters = client.filtersAfter(del).map((f) => f.args);
+    expect(filters).toEqual([
+      ["endpoint", subscription.endpoint],
+      ["user_id", "user-abc"],
+    ]);
   });
 });

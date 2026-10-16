@@ -53,10 +53,13 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
   }, [supabase]);
 
   // Close the drawer whenever the route changes (tap on a link, back button).
-  useEffect(() => {
+  // Derived-state pattern: compare during render instead of in an effect.
+  const [lastPath, setLastPath] = useState(pathname);
+  if (lastPath !== pathname) {
+    setLastPath(pathname);
     setMenuOpen(false);
     setConfirmSignOut(false);
-  }, [pathname]);
+  }
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -76,7 +79,7 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
         <div className="flex items-center justify-between h-16">
           <Link
             href="/"
-            className="font-display text-gold text-[0.6rem] sm:text-sm tracking-wide hover:text-burnt-orange transition-colors flex items-center gap-2 whitespace-nowrap"
+            className="font-display text-gold text-[0.6rem] sm:text-sm tracking-wide hover:text-burnt-orange transition-colors flex items-center gap-2 whitespace-nowrap min-w-0 mr-2"
           >
             <Image
               src="/images/logo.png"
@@ -163,38 +166,26 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
                 </button>
               </>
             ) : (
-              <div className="flex items-center gap-3 sm:gap-5">
+              <div className="flex items-center gap-2 sm:gap-5">
                 <Link
                   href="/login"
-                  className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap py-2"
+                  className="text-xs text-cream-dark hover:text-gold transition-colors whitespace-nowrap py-2 px-1"
                 >
                   Log In
                 </Link>
-                <Link href="/signup" className="retro-btn retro-btn-primary text-[0.6rem] whitespace-nowrap">
+                <Link
+                  href="/signup"
+                  className="retro-btn retro-btn-primary text-[0.6rem] whitespace-nowrap px-3 py-2 sm:px-6 sm:py-3"
+                >
                   Sign Up
                 </Link>
-                <button
-                  onClick={() => setMenuOpen(!menuOpen)}
-                  className="md:hidden text-cream w-11 h-11 flex items-center justify-center rounded hover:bg-navy-light"
-                  aria-label={menuOpen ? "Close menu" : "Open menu"}
-                  aria-expanded={menuOpen}
-                  aria-controls="mobile-nav"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    {menuOpen ? (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    ) : (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                    )}
-                  </svg>
-                </button>
               </div>
             )}
           </div>
         </div>
 
         {/* Mobile Nav */}
-        {menuOpen && (
+        {menuOpen && user && (
           <nav id="mobile-nav" className="md:hidden pb-4 flex flex-col gap-1" aria-label="Primary">
             {links.map((link) => (
               <Link
