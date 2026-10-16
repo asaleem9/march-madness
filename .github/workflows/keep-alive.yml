@@ -1,7 +1,18 @@
 name: Keep Supabase awake
 
-# Pings the app's keep-alive endpoint on a schedule so the free-tier Supabase
-# database registers activity and doesn't auto-pause after ~7 days idle.
+# Two jobs keep the free-tier Supabase project from auto-pausing (~7 idle days):
+#
+# 1. `ping` hits the app's keep-alive endpoint daily. The route does a tiny
+#    read through the Supabase API, which counts as activity. The job FAILS
+#    when the read doesn't reach the database, so a paused project shows up
+#    as a red run (and a GitHub failure email) instead of going unnoticed.
+#
+# 2. `heartbeat` pushes an empty commit whenever main has gone 40 days
+#    without one. GitHub silently disables scheduled workflows in a public
+#    repo after 60 days without a commit — that is exactly what stopped this
+#    ping (and the tournament cron) in Sep 2026 and let the database pause.
+#    The commit message carries "[skip vercel]" so vercel.json's
+#    ignoreCommand skips the pointless redeploy.
 on:
   schedule:
     - cron: "0 9 * * *" # daily at 09:00 UTC
@@ -12,4 +23,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping keep-alive endpoint
-        run: curl -fsSL --retry 3 --max-time 30 https://bracketmadness.vercel.app/api/keep-alive
+        run: |
+          body=$(curl -fsSL --retry 3 --retry-delay 15 --max-time 30 \
+            https://bracketmadness.vercel.app/api/keep-alive)
+          echo "$body"
+          if ! echo "$body" | grep -q '"dbOk":true'; then
+            echo "::error::Keep-alive reached the app but the database read failed. Supabase is probably paused — unpause it in the dashboard."
+            exit 1
+          fi
+
+  heartbeat:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      # Re-enabling an already-enabled workflow is a no-op for the schedule but
+      # counts as workflow activity, so this resets GitHub's 60-day timer even
+      # on days the heartbeat commit below isn't needed.
+      - name: Re-enable both scheduled workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in keep-alive.yml tournament-cron.yml; do
+            if gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/enable"; then
+              echo "re-enabled ${wf}"
+            else
+              echo "::warning::Could not re-enable ${wf} via the API (the heartbeat commit still covers it)"
+            fi
+          done
+      - name: Push an empty commit if main has been quiet for 40 days
+        run: |
+          last=$(git log -1 --format=%ct)
+          days=$(( ( $(date +%s) - last ) / 86400 ))
+          echo "Last commit on main was $days day(s) ago"
+          if [ "$days" -lt 40 ]; then
+            echo "Under the 40-day threshold — nothing to do"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: heartbeat commit so GitHub keeps the scheduled workflows enabled [skip vercel]"
+          git push origin HEAD:main

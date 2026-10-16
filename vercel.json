@@ -1,7 +1,16 @@
 {
-  "alias": ["bracketmadness.vercel.app"],
+  "alias": [
+    "bracketmadness.vercel.app"
+  ],
+  "ignoreCommand": "case \"$VERCEL_GIT_COMMIT_MESSAGE\" in *\"[skip vercel]\"*) exit 0;; *) exit 1;; esac",
   "crons": [
-    { "path": "/api/cron/update-scores", "schedule": "0 12 * * *" },
-    { "path": "/api/notifications/send-batch", "schedule": "0 17 * * *" }
+    {
+      "path": "/api/cron/update-scores",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/notifications/send-batch",
+      "schedule": "0 17 * * *"
+    }
   ]
 }
