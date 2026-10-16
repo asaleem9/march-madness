@@ -2,7 +2,7 @@
   "alias": [
     "bracketmadness.vercel.app"
   ],
-  "ignoreCommand": "case \"$VERCEL_GIT_COMMIT_MESSAGE\" in *\"[skip vercel]\"*) exit 0;; *) exit 1;; esac",
+  "ignoreCommand": "subject=$(printf '%s\\n' \"$VERCEL_GIT_COMMIT_MESSAGE\" | head -n1); case \"$subject\" in *\"[skip vercel]\"*) exit 0;; *) exit 1;; esac",
   "crons": [
     {
       "path": "/api/cron/update-scores",
