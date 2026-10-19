@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { profiles, userAchievements } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { ProfileClient } from "@/components/profile/ProfileClient";
-import type { AchievementType, NotificationPreferences } from "@/types";
+import type { NotificationPreferences } from "@/types";
+
+// Reads the session cookie, so it can never be prerendered.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Profile" };
 
@@ -12,47 +18,39 @@ export const metadata: Metadata = { title: "Profile" };
  * the browser otherwise).
  */
 export default async function ProfilePage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=/profile");
 
-  const [{ data: profile, error: profileError }, { data: achievements, error: achievementsError }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("display_name, phone, timezone, notification_preferences")
-        .eq("id", user.id)
-        .maybeSingle(),
-      supabase.from("user_achievements").select("achievement_type").eq("user_id", user.id),
-    ]);
+  const [profile, achievements] = await Promise.all([
+    db.query.profiles.findFirst({
+      columns: { displayName: true, phone: true, timezone: true, notificationPreferences: true },
+      where: eq(profiles.id, user.id),
+    }),
+    db
+      .select({ achievementType: userAchievements.achievementType })
+      .from(userAchievements)
+      .where(eq(userAchievements.userId, user.id)),
+  ]);
 
-  if (profileError) throw new Error(`Failed to load profile: ${profileError.message}`);
-  if (achievementsError) {
-    throw new Error(`Failed to load achievements: ${achievementsError.message}`);
-  }
-
-  const fallbackName =
-    (user.user_metadata?.display_name as string | undefined) || user.email?.split("@")[0] || "";
+  const fallbackName = user.name?.trim() || user.email.split("@")[0] || "";
 
   return (
     <ProfileClient
       userId={user.id}
-      email={user.email ?? ""}
+      email={user.email}
       profileExists={!!profile}
       initial={{
-        displayName: profile?.display_name ?? fallbackName,
+        displayName: profile?.displayName ?? fallbackName,
         phone: profile?.phone ?? "",
         timezone: profile?.timezone ?? "America/New_York",
-        preferences: (profile?.notification_preferences as NotificationPreferences | null) ?? {
+        preferences: (profile?.notificationPreferences as NotificationPreferences | null) ?? {
           push: true,
           sms: false,
           email: false,
           digest_only: false,
         },
       }}
-      earned={(achievements ?? []).map((a) => a.achievement_type as AchievementType)}
+      earned={achievements.map((a) => a.achievementType)}
       channels={{
         sms: !!process.env.TWILIO_ACCOUNT_SID,
         email: !!process.env.RESEND_API_KEY,

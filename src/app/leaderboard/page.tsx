@@ -1,20 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { bracketPicks, brackets, games, teams, userAchievements } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getScoringMultipliers, getSeason } from "@/lib/tournament";
 import { LeaderboardClient } from "@/components/leaderboard/LeaderboardClient";
-import {
-  buildRows,
-  type BracketRowInput,
-  type PickRowInput,
-} from "@/components/leaderboard/buildRows";
+import { buildRows } from "@/components/leaderboard/buildRows";
 
 export const metadata: Metadata = { title: "Leaderboard" };
 export const dynamic = "force-dynamic";
-
-/** PostgREST caps a response at 1000 rows; 63 picks × 15 brackets stays under it. */
-const PICKS_CHUNK = 15;
 
 function formatEastern(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -28,68 +23,90 @@ function formatEastern(iso: string): string {
 }
 
 export default async function LeaderboardPage() {
-  // Admin client so logged-out visitors can see the board; the session client
-  // only tells us who "you" are.
-  const admin = createAdminClient();
-  const supabase = await createClient();
-
-  const [
-    {
-      data: { user },
-    },
-    season,
-    bracketsRes,
-    gamesRes,
-    teamsRes,
-    achievementsRes,
-  ] = await Promise.all([
-    supabase.auth.getUser(),
+  // The board is public; the session only tells us who "you" are.
+  const [user, season, bracketRows, gameRows, teamRows, achievementRows] = await Promise.all([
+    getCurrentUser(),
     getSeason(),
-    admin
-      .from("brackets")
-      .select("id, user_id, name, score, profiles!inner(id, display_name, avatar_url)")
-      .eq("is_primary", true)
-      .eq("locked", true)
-      .order("score", { ascending: false }),
-    admin.from("games").select("game_slot, round, status, winner_id"),
-    admin.from("teams").select("id, name, abbreviation, logo_url, eliminated"),
-    admin.from("user_achievements").select("user_id, achievement_type"),
+    db.query.brackets.findMany({
+      columns: { id: true, userId: true, name: true, score: true },
+      where: and(eq(brackets.isPrimary, true), eq(brackets.locked, true)),
+      with: { user: { columns: { id: true, displayName: true, avatarUrl: true } } },
+      orderBy: desc(brackets.score),
+    }),
+    db
+      .select({
+        gameSlot: games.gameSlot,
+        round: games.round,
+        status: games.status,
+        winnerId: games.winnerId,
+      })
+      .from(games),
+    db
+      .select({
+        id: teams.id,
+        name: teams.name,
+        abbreviation: teams.abbreviation,
+        logoUrl: teams.logoUrl,
+        eliminated: teams.eliminated,
+      })
+      .from(teams),
+    db
+      .select({
+        userId: userAchievements.userId,
+        achievementType: userAchievements.achievementType,
+      })
+      .from(userAchievements),
   ]);
 
-  if (bracketsRes.error) throw new Error(`Failed to load brackets: ${bracketsRes.error.message}`);
-  if (gamesRes.error) throw new Error(`Failed to load games: ${gamesRes.error.message}`);
-  if (teamsRes.error) throw new Error(`Failed to load teams: ${teamsRes.error.message}`);
-  if (achievementsRes.error) {
-    throw new Error(`Failed to load achievements: ${achievementsRes.error.message}`);
-  }
-
-  const brackets = (bracketsRes.data ?? []) as unknown as BracketRowInput[];
-
-  const picks: PickRowInput[] = [];
-  const bracketIds = brackets.map((b) => b.id);
-  const chunks: string[][] = [];
-  for (let i = 0; i < bracketIds.length; i += PICKS_CHUNK) {
-    chunks.push(bracketIds.slice(i, i + PICKS_CHUNK));
-  }
-  const pickResults = await Promise.all(
-    chunks.map((ids) =>
-      admin
-        .from("bracket_picks")
-        .select("bracket_id, game_slot, picked_team_id, points_earned, is_correct")
-        .in("bracket_id", ids)
-    )
-  );
-  for (const res of pickResults) {
-    if (res.error) throw new Error(`Failed to load picks: ${res.error.message}`);
-    picks.push(...((res.data ?? []) as PickRowInput[]));
-  }
+  const bracketIds = bracketRows.map((b) => b.id);
+  const pickRows =
+    bracketIds.length === 0
+      ? []
+      : await db
+          .select({
+            bracketId: bracketPicks.bracketId,
+            gameSlot: bracketPicks.gameSlot,
+            pickedTeamId: bracketPicks.pickedTeamId,
+            pointsEarned: bracketPicks.pointsEarned,
+            isCorrect: bracketPicks.isCorrect,
+          })
+          .from(bracketPicks)
+          .where(inArray(bracketPicks.bracketId, bracketIds));
 
   const rows = buildRows({
-    brackets,
-    picks,
-    games: gamesRes.data ?? [],
-    teams: teamsRes.data ?? [],
-    achievements: achievementsRes.data ?? [],
+    brackets: bracketRows.map((b) => ({
+      id: b.id,
+      user_id: b.userId,
+      name: b.name,
+      score: b.score,
+      profiles: b.user
+        ? { id: b.user.id, display_name: b.user.displayName, avatar_url: b.user.avatarUrl }
+        : null,
+    })),
+    picks: pickRows.map((p) => ({
+      bracket_id: p.bracketId,
+      game_slot: p.gameSlot,
+      picked_team_id: p.pickedTeamId,
+      points_earned: p.pointsEarned,
+      is_correct: p.isCorrect,
+    })),
+    games: gameRows.map((g) => ({
+      game_slot: g.gameSlot,
+      round: g.round,
+      status: g.status,
+      winner_id: g.winnerId,
+    })),
+    teams: teamRows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      abbreviation: t.abbreviation,
+      logo_url: t.logoUrl,
+      eliminated: t.eliminated,
+    })),
+    achievements: achievementRows.map((a) => ({
+      user_id: a.userId,
+      achievement_type: a.achievementType,
+    })),
     multipliers: getScoringMultipliers(season.config),
   });
 

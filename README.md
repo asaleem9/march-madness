@@ -7,7 +7,7 @@ A March Madness bracket prediction app for the NCAA tournament (ready for the 76
 ## Features
 
 - **Bracket Builder** — Pick all 63 winners from the Round of 64 to the title game (the 12 Opening Round play-ins resolve automatically) with an interactive bracket UI
-- **Live Scores** — Real-time game updates via ESPN data and Supabase Realtime
+- **Live Scores** — Game updates from ESPN data, refreshed every 30 seconds while you watch
 - **Leaderboards** — See how your picks stack up against everyone else, with upset bonus scoring
 - **Wagers** — Challenge friends to head-to-head bracket matchups
 - **Notifications** — Get updates via Web Push, SMS, or email when your picks hit (or miss)
@@ -16,8 +16,7 @@ A March Madness bracket prediction app for the NCAA tournament (ready for the 76
 ## Tech Stack
 
 - **Framework**: Next.js 16 (App Router)
-- **Database**: Supabase (PostgreSQL + Auth + Realtime)
-- **ORM**: Drizzle
+- **Database**: Neon Postgres (Drizzle ORM) + Neon Auth (managed Better Auth)
 - **State**: Zustand (bracket picks) + TanStack Query (server data)
 - **Styling**: Tailwind CSS v4
 - **Deployment**: Vercel
@@ -31,8 +30,9 @@ npm install
 # Set up environment variables (see .env.example)
 cp .env.example .env.local
 
-# Apply database migrations (Supabase CLI)
-supabase db push --linked
+# Link the Neon project (writes DATABASE_URL etc. into .env.local) and apply migrations
+neon link
+npm run db:migrate
 
 # Start a season: wipe last year's tournament data and insert the config + bracket skeleton
 npm run db:rollover -- --year 2027 --confirm
@@ -63,9 +63,10 @@ Open [http://localhost:3000](http://localhost:3000) to see the app.
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project (browser + server clients) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role (cron, admin routes, scripts) |
-| `DATABASE_URL` | Drizzle migrations |
+| `DATABASE_URL` | Neon pooled connection (all app queries) |
+| `DATABASE_URL_UNPOOLED` | Neon direct connection (migrations, `db:rollover`, `db:import-json`) |
+| `NEON_AUTH_BASE_URL` | Neon Auth URL for the branch (`neon neon-auth status`) |
+| `NEON_AUTH_COOKIE_SECRET` | Secret for the session cookie (`openssl rand -base64 32`) |
 | `CRON_SECRET` | Bearer token for `/api/cron/*` and admin operational endpoints; also set it as a **GitHub Actions repository secret** for `.github/workflows/tournament-cron.yml` |
 | `ADMIN_EMAILS` | Comma-separated admin accounts |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push (`npm run generate-vapid`) |

@@ -1,40 +1,82 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, eq, notInArray, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { bracketPicks, brackets, games, profiles, tournamentConfig } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { sanitizeError } from "@/lib/sanitizeError";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { REQUIRED_PICKS } from "@/lib/tournament-structure";
 import { isPastDeadline as deadlinePassed } from "@/lib/tournament-config";
+import { countablePicks, validatePicks, type PickInput, type ValidPick } from "@/lib/validate-picks";
 
-// The bracket lock deadline is the real cutoff for any pick changes. Picks are
-// written with the admin client (to bypass the RLS deadline clause during the
-// normal save flow), so this is the only place the deadline is enforced for
-// those writes — it must run before every insert/upsert.
-async function isPastDeadline(supabase: SupabaseClient): Promise<boolean> {
-  const { data: config } = await supabase
-    .from("tournament_config")
-    .select("bracket_lock_deadline")
-    .eq("id", 1)
-    .single();
+/** The pg error text is on `cause` when Drizzle wraps a failed query. */
+function dbErrorMessage(err: unknown): string | undefined {
+  const e = err as { message?: string; cause?: { message?: string } };
+  return e?.cause?.message ?? e?.message;
+}
 
-  return deadlinePassed(config);
+// The bracket lock deadline is the real cutoff for any pick changes. Nothing
+// else enforces it for these writes, so it must run before every insert/upsert.
+async function isPastDeadline(): Promise<boolean> {
+  const [config] = await db
+    .select({ deadline: tournamentConfig.bracketLockDeadline })
+    .from(tournamentConfig)
+    .where(eq(tournamentConfig.id, 1))
+    .limit(1);
+
+  return deadlinePassed(
+    config ? { bracket_lock_deadline: config.deadline.toISOString() } : null
+  );
+}
+
+/**
+ * Check the request's picks against the bracket tree (slot range, feeder
+ * consistency, play-in handling) and return rows ready for `bracket_picks`.
+ * The database can't enforce any of this, so it has to happen here.
+ */
+async function checkPicks(
+  input: PickInput[]
+): Promise<{ ok: true; picks: ValidPick[] } | { ok: false; response: NextResponse }> {
+  if (input.length === 0) return { ok: true, picks: [] };
+  const tree = await db
+    .select({
+      gameSlot: games.gameSlot,
+      round: games.round,
+      nextGameSlot: games.nextGameSlot,
+      teamAId: games.teamAId,
+      teamBId: games.teamBId,
+    })
+    .from(games);
+  const result = validatePicks(input, tree);
+  if (!result.ok) {
+    return { ok: false, response: NextResponse.json({ error: result.error }, { status: 400 }) };
+  }
+  return result;
+}
+
+function toPickRows(bracketId: string, picks: ValidPick[]) {
+  return picks.map((p) => ({ bracketId, gameSlot: p.gameSlot, round: p.round, pickedTeamId: p.pickedTeamId }));
+}
+
+function incompleteResponse() {
+  return NextResponse.json(
+    { error: `All ${REQUIRED_PICKS} picks are required to finalize your bracket` },
+    { status: 400 }
+  );
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json();
-  const { name, picks, lock } = body;
+  const { name, lock } = body;
+  const rawPicks = (Array.isArray(body.picks) ? body.picks : []) as PickInput[];
 
   // Enforce the lock deadline — no new brackets or picks once it passes
-  if (await isPastDeadline(supabase)) {
+  if (await isPastDeadline()) {
     return NextResponse.json(
       { error: "The bracket deadline has passed. Brackets are locked." },
       { status: 403 }
@@ -42,96 +84,96 @@ export async function POST(request: NextRequest) {
   }
 
   // Enforce one bracket per user
-  const { data: existingBrackets } = await supabase
-    .from("brackets")
-    .select("id")
-    .eq("user_id", user.id);
+  const [existing] = await db
+    .select({ id: brackets.id })
+    .from(brackets)
+    .where(eq(brackets.userId, user.id))
+    .limit(1);
 
-  if (existingBrackets && existingBrackets.length > 0) {
+  if (existing) {
     return NextResponse.json(
-      { error: "You already have a bracket", bracketId: existingBrackets[0].id },
+      { error: "You already have a bracket", bracketId: existing.id },
       { status: 409 }
     );
   }
 
   // If locking, require all picks
-  if (lock && (!picks || picks.length < REQUIRED_PICKS)) {
-    return NextResponse.json(
-      { error: `All ${REQUIRED_PICKS} picks are required to finalize your bracket` },
-      { status: 400 }
-    );
+  if (lock && countablePicks(rawPicks.map((p) => ({ gameSlot: Number(p.game_slot) }))) < REQUIRED_PICKS) {
+    return incompleteResponse();
   }
 
-  // Create bracket
-  const { data: bracket, error: bracketError } = await supabase
-    .from("brackets")
-    .insert({
-      user_id: user.id,
-      name: name || `${user.user_metadata?.display_name || user.email?.split("@")[0] || "My"}'s Bracket`,
-      is_primary: true,
-      locked: !!lock,
-    })
-    .select()
-    .single();
+  const checked = await checkPicks(rawPicks);
+  if (!checked.ok) return checked.response;
+  const picks = checked.picks;
+  if (lock && picks.length < REQUIRED_PICKS) return incompleteResponse();
 
-  if (bracketError) {
+  let bracketName: string = typeof name === "string" && name.trim() ? name : "";
+  if (!bracketName) {
+    const [profile] = await db
+      .select({ displayName: profiles.displayName })
+      .from(profiles)
+      .where(eq(profiles.id, user.id))
+      .limit(1);
+    const who = profile?.displayName || user.name || user.email?.split("@")[0] || "My";
+    bracketName = `${who}'s Bracket`;
+  }
+
+  // Create the bracket and its picks together: if a pick row is rejected the
+  // bracket is rolled back with it.
+  let bracketId: string;
+  try {
+    bracketId = await db.transaction(async (tx) => {
+      const [bracket] = await tx
+        .insert(brackets)
+        .values({
+          userId: user.id,
+          name: bracketName,
+          isPrimary: true,
+          locked: !!lock,
+        })
+        .returning({ id: brackets.id });
+
+      if (picks.length > 0) {
+        await tx.insert(bracketPicks).values(toPickRows(bracket.id, picks));
+      }
+      return bracket.id;
+    });
+  } catch (err) {
     return NextResponse.json(
-      { error: sanitizeError(bracketError.message) },
+      { error: sanitizeError(dbErrorMessage(err)) },
       { status: 500 }
     );
   }
 
-  // Insert picks with the admin client to bypass the RLS deadline clause.
-  // Safe because isPastDeadline() was already enforced above.
-  if (picks && picks.length > 0) {
-    const admin = createAdminClient();
-    const pickRows = picks.map(
-      (p: { game_slot: number; round: string; picked_team_id: number }) => ({
-        bracket_id: bracket.id,
-        game_slot: p.game_slot,
-        round: p.round,
-        picked_team_id: p.picked_team_id,
-      })
-    );
-
-    const { error: picksError } = await admin
-      .from("bracket_picks")
-      .insert(pickRows);
-
-    if (picksError) {
-      // Rollback bracket
-      await admin.from("brackets").delete().eq("id", bracket.id);
-      return NextResponse.json(
-        { error: sanitizeError(picksError.message) },
-        { status: 500 }
-      );
-    }
-  }
-
-  return NextResponse.json({ bracketId: bracket.id, locked: !!lock });
+  return NextResponse.json({ bracketId, locked: !!lock });
 }
 
 export async function PUT(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await request.json();
-  const { bracketId, name, picks, lock } = body;
+  const { bracketId, name, lock } = body;
+  const rawPicks = (Array.isArray(body.picks) ? body.picks : []) as PickInput[];
 
-  // Verify ownership and lock status
-  const { data: bracket } = await supabase
-    .from("brackets")
-    .select("*")
-    .eq("id", bracketId)
-    .single();
+  // Verify ownership and lock status. A malformed id is just "not found".
+  let bracket: { id: string; userId: string; locked: boolean | null } | undefined;
+  if (typeof bracketId === "string") {
+    try {
+      [bracket] = await db
+        .select({ id: brackets.id, userId: brackets.userId, locked: brackets.locked })
+        .from(brackets)
+        .where(eq(brackets.id, bracketId))
+        .limit(1);
+    } catch {
+      bracket = undefined;
+    }
+  }
 
-  if (!bracket || bracket.user_id !== user.id) {
+  if (!bracket || bracket.userId !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -140,7 +182,7 @@ export async function PUT(request: NextRequest) {
   }
 
   // Once the deadline passes, no more edits — even for an unlocked bracket
-  if (await isPastDeadline(supabase)) {
+  if (await isPastDeadline()) {
     return NextResponse.json(
       { error: "The bracket deadline has passed. Brackets are locked." },
       { status: 403 }
@@ -148,68 +190,61 @@ export async function PUT(request: NextRequest) {
   }
 
   // If locking, require all picks
-  if (lock && (!picks || picks.length < REQUIRED_PICKS)) {
+  if (lock && countablePicks(rawPicks.map((p) => ({ gameSlot: Number(p.game_slot) }))) < REQUIRED_PICKS) {
+    return incompleteResponse();
+  }
+
+  const checked = await checkPicks(rawPicks);
+  if (!checked.ok) return checked.response;
+  const picks = checked.picks;
+  if (lock && picks.length < REQUIRED_PICKS) return incompleteResponse();
+
+  // Replace the picks and (only once they're all saved) lock, as one unit: if
+  // any pick is rejected nothing changes and the old picks are preserved.
+  try {
+    await db.transaction(async (tx) => {
+      const updateFields: Partial<typeof brackets.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (typeof name === "string" && name) updateFields.name = name;
+      await tx.update(brackets).set(updateFields).where(eq(brackets.id, bracketId));
+
+      if (picks.length > 0) {
+        const pickRows = toPickRows(bracketId, picks);
+
+        await tx
+          .insert(bracketPicks)
+          .values(pickRows)
+          .onConflictDoUpdate({
+            target: [bracketPicks.bracketId, bracketPicks.gameSlot],
+            set: {
+              round: sql`excluded.round`,
+              pickedTeamId: sql`excluded.picked_team_id`,
+            },
+          });
+
+        // Remove any stale picks not in the new set
+        const newGameSlots = pickRows.map((p) => p.gameSlot);
+        await tx
+          .delete(bracketPicks)
+          .where(
+            and(
+              eq(bracketPicks.bracketId, bracketId),
+              notInArray(bracketPicks.gameSlot, newGameSlots)
+            )
+          );
+      }
+
+      // Lock only after picks saved successfully
+      if (lock) {
+        await tx.update(brackets).set({ locked: true }).where(eq(brackets.id, bracketId));
+      }
+    });
+  } catch (err) {
     return NextResponse.json(
-      { error: `All ${REQUIRED_PICKS} picks are required to finalize your bracket` },
-      { status: 400 }
+      { error: sanitizeError(dbErrorMessage(err)) },
+      { status: 500 }
     );
-  }
-
-  // Update bracket name (lock status set after picks succeed)
-  const adminForUpdate = createAdminClient();
-  const updateFields: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
-  };
-  if (name) updateFields.name = name;
-
-  await adminForUpdate
-    .from("brackets")
-    .update(updateFields)
-    .eq("id", bracketId);
-
-  // Replace picks atomically with the admin client to bypass the RLS deadline
-  // clause. Safe because isPastDeadline()/locked were already enforced above.
-  if (picks && picks.length > 0) {
-    const admin = createAdminClient();
-
-    const pickRows = picks.map(
-      (p: { game_slot: number; round: string; picked_team_id: number }) => ({
-        bracket_id: bracketId,
-        game_slot: p.game_slot,
-        round: p.round,
-        picked_team_id: p.picked_team_id,
-      })
-    );
-    // Coerce to integers so client-supplied values can't corrupt the
-    // "delete stale picks" filter below.
-    const newGameSlots = picks
-      .map((p: { game_slot: number }) => Number(p.game_slot))
-      .filter((n: number) => Number.isInteger(n));
-
-    // Upsert new picks (safe — doesn't delete anything on failure)
-    const { error: upsertError } = await admin
-      .from("bracket_picks")
-      .upsert(pickRows, { onConflict: "bracket_id,game_slot" });
-
-    if (upsertError) {
-      return NextResponse.json({ error: sanitizeError(upsertError.message) }, { status: 500 });
-    }
-
-    // Remove any stale picks not in the new set
-    await admin
-      .from("bracket_picks")
-      .delete()
-      .eq("bracket_id", bracketId)
-      .not("game_slot", "in", `(${newGameSlots.join(",")})`);
-  }
-
-  // Lock only after picks saved successfully
-  if (lock) {
-    const admin = createAdminClient();
-    await admin
-      .from("brackets")
-      .update({ locked: true })
-      .eq("id", bracketId);
   }
 
   return NextResponse.json({ bracketId, locked: !!lock });

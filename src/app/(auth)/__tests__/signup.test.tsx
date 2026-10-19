@@ -6,23 +6,29 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // ---------------------------------------------------------------------------
 
 const mockPush = vi.fn();
+const mockRefresh = vi.fn();
 const mockGet = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
   useSearchParams: () => ({ get: mockGet }),
 }));
 
-const mockSignUp = vi.fn();
-const mockSignInWithOAuth = vi.fn();
-const mockResend = vi.fn();
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({
-    auth: {
-      signUp: mockSignUp,
-      signInWithOAuth: mockSignInWithOAuth,
-      resend: mockResend,
+const mockSignUpEmail = vi.fn();
+const mockSignInSocial = vi.fn();
+vi.mock("@/lib/auth/client", () => ({
+  authClient: {
+    useSession: vi.fn(),
+    signOut: vi.fn(),
+    signIn: {
+      email: vi.fn(),
+      social: (...args: unknown[]) => mockSignInSocial(...args),
     },
-  }),
+    signUp: { email: (...args: unknown[]) => mockSignUpEmail(...args) },
+    requestPasswordReset: vi.fn(),
+    resetPassword: vi.fn(),
+    updateUser: vi.fn(),
+    changePassword: vi.fn(),
+  },
 }));
 
 // next/link: render a plain <a> so we can assert on it without router context
@@ -43,26 +49,26 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import SignupPage from "../signup/page";
+import { SignupForm } from "../_components/SignupForm";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fillAndSubmitForm() {
+function fillAndSubmitForm(password = "password123", confirm = password) {
   fireEvent.change(screen.getByPlaceholderText("BracketKing42"), {
     target: { value: "TestUser" },
   });
   fireEvent.change(screen.getByPlaceholderText("your@email.com"), {
     target: { value: "test@example.com" },
   });
-  fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), {
-    target: { value: "password123" },
+  fireEvent.change(screen.getByPlaceholderText("Min. 8 characters"), {
+    target: { value: password },
   });
   // Confirm password is a required field — leaving it empty makes jsdom's
   // form validation block submission, so fill it too.
   fireEvent.change(screen.getByPlaceholderText("Retype your password"), {
-    target: { value: "password123" },
+    target: { value: confirm },
   });
   fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 }
@@ -71,103 +77,83 @@ function fillAndSubmitForm() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("SignupPage", () => {
+describe("SignupForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGet.mockReturnValue(null); // no redirect param by default
-    mockSignUp.mockResolvedValue({
-      data: { session: { access_token: "tok" } },
-      error: null,
-    });
-    mockSignInWithOAuth.mockResolvedValue({ error: null });
-    mockResend.mockResolvedValue({ error: null });
+    mockSignUpEmail.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    mockSignInSocial.mockResolvedValue({ data: {}, error: null });
   });
 
   it("renders form fields for display name, email, and password", () => {
-    render(<SignupPage />);
+    render(<SignupForm />);
 
-    expect(
-      screen.getByPlaceholderText("BracketKing42"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText("your@email.com"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText("Min. 6 characters"),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("BracketKing42")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Min. 8 characters")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Retype your password")).toBeInTheDocument();
   });
 
-  it("shows error when password is shorter than 6 characters", async () => {
-    render(<SignupPage />);
+  it("shows error when password is shorter than 8 characters", async () => {
+    render(<SignupForm />);
+    fillAndSubmitForm("short");
 
-    fireEvent.change(screen.getByPlaceholderText("BracketKing42"), {
-      target: { value: "Player1" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("your@email.com"), {
-      target: { value: "a@b.com" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), {
-      target: { value: "short" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("Retype your password"), {
-      target: { value: "short" },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText("Password must be at least 6 characters"),
-      ).toBeInTheDocument();
-    });
-
-    expect(mockSignUp).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Password must be at least 8 characters"
+    );
+    expect(mockSignUpEmail).not.toHaveBeenCalled();
   });
 
-  it("calls signUp with email, password, and display_name", async () => {
-    render(<SignupPage />);
+  it("renders a mismatch in a role=alert box without signing up", async () => {
+    render(<SignupForm />);
+    fillAndSubmitForm("abcdefgh", "abcdefgi");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match");
+    expect(mockSignUpEmail).not.toHaveBeenCalled();
+  });
+
+  it("signs up with email, password, and the display name as the account name", async () => {
+    render(<SignupForm />);
     fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(mockSignUp).toHaveBeenCalledWith({
+      expect(mockSignUpEmail).toHaveBeenCalledWith({
         email: "test@example.com",
         password: "password123",
-        options: { data: { display_name: "TestUser" } },
+        name: "TestUser",
       });
     });
   });
 
-  it("shows error message when signUp fails", async () => {
-    mockSignUp.mockResolvedValue({
-      data: { session: null },
-      error: { message: "Email already registered" },
+  it("shows error message when sign-up fails", async () => {
+    mockSignUpEmail.mockResolvedValue({
+      data: null,
+      error: { message: "User already exists" },
     });
 
-    render(<SignupPage />);
+    render(<SignupForm />);
     fillAndSubmitForm();
 
-    await waitFor(() => {
-      expect(
-        screen.getByText("Email already registered"),
-      ).toBeInTheDocument();
-    });
-
+    expect(await screen.findByRole("alert")).toHaveTextContent("User already exists");
     expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /create account/i })).not.toBeDisabled();
   });
 
-  it("redirects to /dashboard on successful signup with session", async () => {
-    render(<SignupPage />);
+  it("redirects to /dashboard after a successful signup (no email confirmation step)", async () => {
+    render(<SignupForm />);
     fillAndSubmitForm();
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/dashboard");
     });
+    expect(mockRefresh).toHaveBeenCalled();
+    expect(screen.queryByText("CHECK YOUR EMAIL")).not.toBeInTheDocument();
   });
 
-  it("redirects to custom redirect param on successful signup with session", async () => {
+  it("redirects to the custom redirect param after signup", async () => {
     mockGet.mockReturnValue("/bracket/my-bracket");
 
-    render(<SignupPage />);
+    render(<SignupForm />);
     fillAndSubmitForm();
 
     await waitFor(() => {
@@ -175,139 +161,78 @@ describe("SignupPage", () => {
     });
   });
 
-  it("shows check-your-email message when signup returns no session", async () => {
-    mockSignUp.mockResolvedValue({
-      data: { session: null },
-      error: null,
-    });
-
-    render(<SignupPage />);
-    fillAndSubmitForm();
-
-    await waitFor(() => {
-      expect(
-        screen.getByText("CHECK YOUR EMAIL"),
-      ).toBeInTheDocument();
-    });
-
-    expect(
-      screen.getByText(/confirmation link/i),
-    ).toBeInTheDocument();
-
-    // Should NOT have redirected
-    expect(mockPush).not.toHaveBeenCalled();
-  });
-
   it("shows loading state during submission", async () => {
     // Keep signUp hanging so we can observe the loading state
-    let resolveSignUp!: (value: { data: { session: { access_token: string } }; error: null }) => void;
-    mockSignUp.mockReturnValue(
+    let resolveSignUp!: (value: { data: unknown; error: null }) => void;
+    mockSignUpEmail.mockReturnValue(
       new Promise((resolve) => {
         resolveSignUp = resolve;
-      }),
+      })
     );
 
-    render(<SignupPage />);
+    render(<SignupForm />);
     fillAndSubmitForm();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /creating account\.\.\./i }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /creating account\.\.\./i })).toBeDisabled();
     });
 
     // Resolve to avoid act() warning
-    resolveSignUp({ data: { session: { access_token: "tok" } }, error: null });
+    resolveSignUp({ data: {}, error: null });
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalled();
     });
   });
 
-  it("calls signInWithOAuth with default redirect when no param", async () => {
-    render(<SignupPage />);
+  it("starts Google sign-in with the default redirect when there is no param", async () => {
+    render(<SignupForm />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /sign up with google/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /sign up with google/i }));
 
     await waitFor(() => {
-      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      expect(mockSignInSocial).toHaveBeenCalledWith({
         provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/dashboard")}`,
-        },
+        callbackURL: `${window.location.origin}/callback?redirect=${encodeURIComponent("/dashboard")}`,
       });
     });
   });
 
-  it("calls signInWithOAuth with custom redirect param", async () => {
+  it("starts Google sign-in with the custom redirect param", async () => {
     mockGet.mockReturnValue("/wagers");
 
-    render(<SignupPage />);
+    render(<SignupForm />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /sign up with google/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /sign up with google/i }));
 
     await waitFor(() => {
-      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      expect(mockSignInSocial).toHaveBeenCalledWith({
         provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
-        },
+        callbackURL: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
       });
     });
   });
 
-  it("pairs every input with a label", () => {
-    render(<SignupPage />);
+  it("pairs every input with a label and links to login", () => {
+    render(<SignupForm />);
 
     expect(screen.getByLabelText("DISPLAY NAME")).toHaveAttribute("id", "signup-display-name");
     expect(screen.getByLabelText("EMAIL")).toHaveAttribute("id", "signup-email");
     expect(screen.getByLabelText("PASSWORD")).toHaveAttribute("id", "signup-password");
     expect(screen.getByLabelText("CONFIRM PASSWORD")).toHaveAttribute(
       "id",
-      "signup-confirm-password",
+      "signup-confirm-password"
     );
-  });
-
-  it("renders validation errors in a role=alert box", async () => {
-    render(<SignupPage />);
-    fireEvent.change(screen.getByPlaceholderText("BracketKing42"), { target: { value: "P" } });
-    fireEvent.change(screen.getByPlaceholderText("your@email.com"), { target: { value: "a@b.com" } });
-    fireEvent.change(screen.getByPlaceholderText("Min. 6 characters"), { target: { value: "abcdef" } });
-    fireEvent.change(screen.getByPlaceholderText("Retype your password"), { target: { value: "abcdeg" } });
-    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match");
-  });
-
-  it("success screen offers resend, spam hint, and login/reset links", async () => {
-    mockSignUp.mockResolvedValue({ data: { session: null }, error: null });
-
-    render(<SignupPage />);
-    fillAndSubmitForm();
-
-    await screen.findByText("CHECK YOUR EMAIL");
-    expect(screen.getByText(/spam folder/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^log in$/i })).toHaveAttribute("href", "/login");
-    expect(screen.getByRole("link", { name: /reset password/i })).toHaveAttribute(
-      "href",
-      "/forgot-password",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /resend email/i }));
-    await waitFor(() => {
-      expect(mockResend).toHaveBeenCalledWith({ type: "signup", email: "test@example.com" });
-    });
-    expect(await screen.findByRole("button", { name: /resend in 60s/i })).toBeDisabled();
   });
 
   it("surfaces OAuth errors and re-enables the Google button", async () => {
-    mockSignInWithOAuth.mockResolvedValue({ error: { message: "Provider is not enabled" } });
+    mockSignInSocial.mockResolvedValue({
+      data: null,
+      error: { message: "Provider is not enabled" },
+    });
 
-    render(<SignupPage />);
+    render(<SignupForm />);
     fireEvent.click(screen.getByRole("button", { name: /sign up with google/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Provider is not enabled");

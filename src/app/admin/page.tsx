@@ -1,91 +1,26 @@
-"use client";
-
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { Loader } from "@/components/Loader";
-import { ConfigForm } from "@/components/admin/ConfigForm";
-import { ImportPanel } from "@/components/admin/ImportPanel";
-import { ActionsPanel } from "@/components/admin/ActionsPanel";
-import { ScoreEntry } from "@/components/admin/ScoreEntry";
-import { HealthPanel } from "@/components/admin/HealthPanel";
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { asc, count, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { games, notificationQueue, teams, tournamentConfig } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
+import { isAdminEmail } from "@/lib/admin-auth";
+import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import type { AdminConfig, GameForAdmin } from "@/components/admin/types";
 
-const GAME_SELECT =
-  "id, round, region, game_slot, status, score_a, score_b, winner_id, espn_game_id, clock, period, " +
-  "team_a:teams!team_a_id(id, name, seed), team_b:teams!team_b_id(id, name, seed)";
+export const metadata: Metadata = { title: "Admin" };
+export const dynamic = "force-dynamic";
 
-export default function AdminPage() {
-  const [supabase] = useState(() => createClient());
-  const router = useRouter();
-  const [games, setGames] = useState<GameForAdmin[]>([]);
-  const [config, setConfig] = useState<AdminConfig | null>(null);
-  const [teamCount, setTeamCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+/**
+ * Server wrapper for the admin dashboard: gates on the admin allow-list, then
+ * loads the config row (plus the unsent-notification count), every game with
+ * its teams, and the team count. Mutations go through /api/admin/*.
+ */
+export default async function AdminPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login?redirect=/admin");
 
-  /** Browser-client reads: games (authenticated-readable) and team count. Queue depth comes with the config. */
-  const loadData = useCallback(async () => {
-    const [gamesRes, teamsRes] = await Promise.all([
-      supabase.from("games").select(GAME_SELECT).order("game_slot"),
-      supabase.from("teams").select("id", { count: "exact", head: true }),
-    ]);
-    if (gamesRes.error) setLoadError(gamesRes.error.message);
-    setGames((gamesRes.data as unknown as GameForAdmin[]) ?? []);
-    setTeamCount(teamsRes.error ? null : (teamsRes.count ?? 0));
-  }, [supabase]);
-
-  const reloadConfig = useCallback(async () => {
-    const res = await fetch("/api/admin/config");
-    if (res.ok) setConfig((await res.json()) as AdminConfig);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login?redirect=/admin");
-        return;
-      }
-      // Config also serves as the admin check — 403 for non-admins.
-      const configRes = await fetch("/api/admin/config");
-      if (cancelled) return;
-      if (configRes.status === 403) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-      if (configRes.ok) {
-        setConfig((await configRes.json()) as AdminConfig);
-      } else {
-        setLoadError(`Could not load config (HTTP ${configRes.status})`);
-      }
-      await loadData();
-      if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, router, loadData]);
-
-  const onDataChanged = useCallback(() => {
-    void loadData();
-    void reloadConfig();
-  }, [loadData, reloadConfig]);
-
-  if (loading) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        <Loader label="Loading admin" />
-      </div>
-    );
-  }
-
-  if (accessDenied) {
+  if (!isAdminEmail(user.email)) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8 text-center">
         <div className="retro-card p-8 max-w-md mx-auto">
@@ -96,39 +31,53 @@ export default function AdminPage() {
     );
   }
 
+  const [configRow, [queue], gameRows, [teamTotal]] = await Promise.all([
+    db.query.tournamentConfig.findFirst({ where: eq(tournamentConfig.id, 1) }),
+    db.select({ depth: count() }).from(notificationQueue).where(eq(notificationQueue.sent, false)),
+    db.query.games.findMany({
+      orderBy: [asc(games.gameSlot)],
+      with: {
+        teamA: { columns: { id: true, name: true, seed: true } },
+        teamB: { columns: { id: true, name: true, seed: true } },
+      },
+    }),
+    db.select({ total: count() }).from(teams),
+  ]);
+
+  const config: AdminConfig | null = configRow
+    ? {
+        id: configRow.id,
+        year: configRow.year,
+        bracket_lock_deadline: configRow.bracketLockDeadline.toISOString(),
+        wager_creation_deadline: configRow.wagerCreationDeadline.toISOString(),
+        active_phase: configRow.activePhase ?? "pre_tournament",
+        scoring_multipliers: configRow.scoringMultipliers,
+        final_four_pairing: (configRow.finalFourPairing as AdminConfig["final_four_pairing"]) ?? null,
+        last_score_update_at: configRow.lastScoreUpdateAt?.toISOString() ?? null,
+        queue_depth: queue?.depth ?? 0,
+      }
+    : null;
+
+  const gameList: GameForAdmin[] = gameRows.map((g) => ({
+    id: g.id,
+    round: g.round,
+    region: g.region,
+    game_slot: g.gameSlot,
+    status: g.status,
+    score_a: g.scoreA,
+    score_b: g.scoreB,
+    winner_id: g.winnerId,
+    espn_game_id: g.espnGameId,
+    clock: g.clock,
+    period: g.period,
+    team_a: g.teamA ?? null,
+    team_b: g.teamB ?? null,
+  }));
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
       <h1 className="font-display text-navy text-sm">ADMIN DASHBOARD</h1>
-
-      {loadError && (
-        <p className="font-body text-xs text-burnt-orange" role="alert">
-          {loadError}
-        </p>
-      )}
-
-      {config ? (
-        <>
-          <HealthPanel config={config} games={games} teamCount={teamCount} />
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-            <div className="lg:col-span-2 space-y-6">
-              <ConfigForm key={config.year} config={config} onSaved={setConfig} />
-              <ImportPanel year={config.year} onImported={onDataChanged} />
-              <ScoreEntry
-                games={games}
-                onGameUpdated={(updated) => {
-                  setGames((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
-                  // A final advances the winner into the next slot; refresh to show it.
-                  if (updated.status === "final") void loadData();
-                }}
-              />
-            </div>
-            <ActionsPanel onDataChanged={onDataChanged} />
-          </div>
-        </>
-      ) : (
-        <p className="font-body text-sm text-navy/70">Tournament config is missing — run the rollover script first.</p>
-      )}
+      <AdminDashboard config={config} games={gameList} teamCount={teamTotal?.total ?? null} />
     </div>
   );
 }

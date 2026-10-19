@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Header } from "../Header";
 
 // --- Mocks ---
 
+const mockPush = vi.fn();
+const mockRefresh = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
 }));
 
 vi.mock("next/link", () => ({
@@ -24,62 +27,50 @@ vi.mock("next/image", () => ({
   ),
 }));
 
-const mockSignOut = vi.fn().mockResolvedValue({});
-let mockUser: { id: string; email: string } | null = null;
-
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({
-    auth: {
-      getUser: () => Promise.resolve({ data: { user: mockUser } }),
-      onAuthStateChange: (_callback: unknown) => ({
-        data: { subscription: { unsubscribe: vi.fn() } },
-      }),
-      signOut: mockSignOut,
-    },
-  }),
+const mockUseSession = vi.fn();
+const mockSignOut = vi.fn();
+vi.mock("@/lib/auth/client", () => ({
+  authClient: {
+    useSession: () => mockUseSession(),
+    signOut: (...args: unknown[]) => mockSignOut(...args),
+  },
 }));
 
 vi.mock("@/lib/utils", () => ({
   cn: (...args: unknown[]) => args.filter(Boolean).join(" "),
 }));
 
+const user = { id: "user-1", email: "test@example.com", name: "Test", image: null };
+const session = (u: typeof user | null) => ({
+  data: u ? { user: u } : null,
+  isPending: false,
+});
+
 // --- Tests ---
 
 describe("Header", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUser = null;
+    mockSignOut.mockResolvedValue({});
+    mockUseSession.mockReturnValue(session(null));
   });
 
-  it("shows Sign Up / Log In when no user", async () => {
-    mockUser = null;
+  it("shows Sign Up / Log In when no user", () => {
+    render(<Header />);
 
-    await act(async () => {
-      render(<Header />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Log In")).toBeInTheDocument();
-      expect(screen.getByText("Sign Up")).toBeInTheDocument();
-    });
-
+    expect(screen.getByText("Log In")).toBeInTheDocument();
+    expect(screen.getByText("Sign Up")).toBeInTheDocument();
     expect(screen.queryByText("Sign Out")).not.toBeInTheDocument();
     expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
     // Public pages stay reachable when logged out.
     expect(screen.getByText("Leaderboard")).toBeInTheDocument();
   });
 
-  it("shows nav links and Sign Out when authenticated", async () => {
-    mockUser = { id: "user-1", email: "test@example.com" };
+  it("shows nav links and Sign Out when authenticated", () => {
+    mockUseSession.mockReturnValue(session(user));
+    render(<Header initialUser={user} />);
 
-    await act(async () => {
-      render(<Header initialUser={mockUser as never} />);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("Sign Out")).toBeInTheDocument();
-    });
-
+    expect(screen.getByText("Sign Out")).toBeInTheDocument();
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
     expect(screen.getByText("Bracket")).toBeInTheDocument();
     expect(screen.getByText("Leaderboard")).toBeInTheDocument();
@@ -87,45 +78,68 @@ describe("Header", () => {
     expect(screen.getByText("Wagers")).toBeInTheDocument();
     expect(screen.queryByText("Log In")).not.toBeInTheDocument();
     expect(screen.queryByText("Sign Up")).not.toBeInTheDocument();
+    expect(screen.queryByText("Admin")).not.toBeInTheDocument();
   });
 
-  it("Sign Out calls signOut and redirects", async () => {
-    mockUser = { id: "user-1", email: "test@example.com" };
+  it("renders the server-seeded user while the browser session is still loading", () => {
+    mockUseSession.mockReturnValue({ data: null, isPending: true });
+    render(<Header initialUser={user} />);
+    expect(screen.getByText("Sign Out")).toBeInTheDocument();
+    expect(screen.queryByText("Log In")).not.toBeInTheDocument();
+  });
 
-    // Mock window.location by defining a writable href
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: { ...originalLocation, href: "" },
-    });
+  it("follows the browser session once it has loaded", () => {
+    // Server said logged in, but the session has since gone away.
+    mockUseSession.mockReturnValue(session(null));
+    render(<Header initialUser={user} />);
+    expect(screen.getByText("Log In")).toBeInTheDocument();
+    expect(screen.queryByText("Sign Out")).not.toBeInTheDocument();
+  });
 
-    await act(async () => {
-      render(<Header initialUser={mockUser as never} />);
-    });
+  it("shows the Admin link only for admins", () => {
+    mockUseSession.mockReturnValue(session(user));
+    render(<Header initialUser={user} isAdmin />);
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+  });
 
-    await waitFor(() => {
-      expect(screen.getByText("Sign Out")).toBeInTheDocument();
-    });
+  it("Sign Out asks for confirmation, then signs out and goes home", async () => {
+    mockUseSession.mockReturnValue(session(user));
+    render(<Header initialUser={user} />);
 
     // Signing out asks for confirmation first so a stray tap can't log you out.
-    await act(async () => {
-      fireEvent.click(screen.getByText("Sign Out"));
-    });
+    fireEvent.click(screen.getByText("Sign Out"));
     expect(mockSignOut).not.toHaveBeenCalled();
-    await act(async () => {
-      fireEvent.click(screen.getByText("Yes"));
-    });
 
-    expect(mockSignOut).toHaveBeenCalled();
+    fireEvent.click(screen.getByText("No"));
+    expect(screen.getByText("Sign Out")).toBeInTheDocument();
+    expect(mockSignOut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Sign Out"));
+    fireEvent.click(screen.getByText("Yes"));
 
     await waitFor(() => {
-      expect(window.location.href).toBe("/");
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
     });
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/");
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
 
-    // Restore
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: originalLocation,
-    });
+  it("opens the mobile drawer with the member links", () => {
+    mockUseSession.mockReturnValue(session(user));
+    render(<Header initialUser={user} />);
+
+    const toggle = screen.getByRole("button", { name: "Open menu" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    const drawer = document.getElementById("mobile-nav");
+    expect(drawer).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Close menu" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+    expect(screen.getAllByText("Profile")).toHaveLength(2);
   });
 });

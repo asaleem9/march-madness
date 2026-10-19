@@ -1,31 +1,48 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { brackets, games, profiles, teams } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { BracketBuilder } from "@/components/bracket/BracketBuilder";
 import { getSeason, isPastDeadline, getScoringMultipliers } from "@/lib/tournament";
 import { formatEasternDate } from "@/components/dashboard/helpers";
-import type { GameWithTeams, Region } from "@/types";
+import type { GameWithTeams, Team } from "@/types";
+
+// Reads the session cookie, so it can never be prerendered.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Create your bracket",
 };
 
-export default async function NewBracketPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+/** Drizzle's team row is already the `Team` shape apart from the nullable `eliminated` flag. */
+function toTeam(t: typeof teams.$inferSelect | null): Team | null {
+  if (!t) return null;
+  return {
+    id: t.id,
+    name: t.name,
+    abbreviation: t.abbreviation,
+    seed: t.seed,
+    region: t.region,
+    record: t.record,
+    logoUrl: t.logoUrl,
+    eliminated: !!t.eliminated,
+    espnId: t.espnId,
+  };
+}
 
+export default async function NewBracketPage() {
+  const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=%2Fbracket%2Fnew");
 
   // Enforce one bracket per user — redirect to existing bracket
-  const { data: existingBracket } = await supabase
-    .from("brackets")
-    .select("id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
+  const [existingBracket] = await db
+    .select({ id: brackets.id })
+    .from(brackets)
+    .where(eq(brackets.userId, user.id))
+    .limit(1);
 
   if (existingBracket) {
     redirect(`/bracket/${existingBracket.id}`);
@@ -80,57 +97,39 @@ export default async function NewBracketPage() {
     );
   }
 
-  // Fetch all games with teams
-  const { data: games, error: gamesError } = await supabase
-    .from("games")
-    .select(
-      `
-      *,
-      team_a:teams!team_a_id(*),
-      team_b:teams!team_b_id(*),
-      winner:teams!winner_id(*)
-    `
-    )
-    .order("game_slot");
-  if (gamesError) throw new Error(`Failed to load games: ${gamesError.message}`);
+  const [gameRows, profile] = await Promise.all([
+    db.query.games.findMany({
+      with: { teamA: true, teamB: true, winner: true },
+      orderBy: asc(games.gameSlot),
+    }),
+    db.query.profiles.findFirst({
+      columns: { displayName: true },
+      where: eq(profiles.id, user.id),
+    }),
+  ]);
 
-  function mapTeam(t: Record<string, unknown> | null) {
-    if (!t) return null;
-    return {
-      id: t.id as number,
-      name: t.name as string,
-      abbreviation: t.abbreviation as string,
-      seed: t.seed as number,
-      region: t.region as Region,
-      record: t.record as string,
-      logoUrl: (t.logo_url as string) || null,
-      eliminated: t.eliminated as boolean,
-      espnId: (t.espn_id as string) || null,
-    };
-  }
-
-  const formattedGames: GameWithTeams[] = (games || []).map((g) => ({
+  const formattedGames: GameWithTeams[] = gameRows.map((g) => ({
     id: g.id,
     round: g.round,
     region: g.region,
-    gameSlot: g.game_slot,
-    nextGameSlot: g.next_game_slot,
-    slotPosition: g.slot_position,
-    teamAId: g.team_a_id,
-    teamBId: g.team_b_id,
-    winnerId: g.winner_id,
-    scoreA: g.score_a,
-    scoreB: g.score_b,
-    scheduledAt: g.scheduled_at,
+    gameSlot: g.gameSlot,
+    nextGameSlot: g.nextGameSlot,
+    slotPosition: g.slotPosition,
+    teamAId: g.teamAId,
+    teamBId: g.teamBId,
+    winnerId: g.winnerId,
+    scoreA: g.scoreA,
+    scoreB: g.scoreB,
+    scheduledAt: g.scheduledAt,
     status: g.status,
-    espnGameId: g.espn_game_id,
-    teamA: mapTeam(g.team_a as Record<string, unknown> | null),
-    teamB: mapTeam(g.team_b as Record<string, unknown> | null),
-    winner: mapTeam(g.winner as Record<string, unknown> | null),
+    espnGameId: g.espnGameId,
+    teamA: toTeam(g.teamA),
+    teamB: toTeam(g.teamB),
+    winner: toTeam(g.winner),
   }));
 
   const displayName =
-    user.user_metadata?.display_name || user.email?.split("@")[0] || "My";
+    profile?.displayName?.trim() || user.name?.trim() || user.email.split("@")[0] || "My";
   const defaultBracketName = `${displayName}'s Bracket`;
 
   return (
@@ -142,7 +141,7 @@ export default async function NewBracketPage() {
         isOwner={true}
         defaultName={defaultBracketName}
         userId={user.id}
-        ownerName={typeof displayName === "string" ? displayName : null}
+        ownerName={displayName}
         multipliers={getScoringMultipliers(config)}
       />
     </div>

@@ -54,6 +54,8 @@ export interface BracketBuilderProps {
   /** `brackets.updated_at` — a local draft newer than this is restored. */
   serverUpdatedAt?: string | null;
   multipliers?: ScoringMultipliers;
+  /** Someone else's draft: its picks stay private until it's finalized or the deadline passes. */
+  picksHidden?: boolean;
 }
 
 const STEPS: Step[] = [...REGION_ORDER, "final_four"];
@@ -82,6 +84,7 @@ export function BracketBuilder({
   userId = null,
   serverUpdatedAt = null,
   multipliers = DEFAULT_SCORING,
+  picksHidden = false,
 }: BracketBuilderProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -401,6 +404,16 @@ export function BracketBuilder({
               className="border-2 border-navy p-2 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold w-full max-w-sm"
             />
           </div>
+        </div>
+      )}
+
+      {picksHidden && (
+        <div
+          role="status"
+          className="retro-card bg-cream border-navy/30 p-4 mb-6 font-body text-sm text-navy/80"
+        >
+          {ownerName ? `${ownerName}'s` : "This"} bracket is still a draft. Picks are private until
+          it&apos;s finalized or the lock deadline passes.
         </div>
       )}
 

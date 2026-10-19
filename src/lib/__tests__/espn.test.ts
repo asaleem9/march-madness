@@ -176,8 +176,8 @@ describe("fetchESPNScoreboard", () => {
 
   it("handles competitor without score (optional field)", async () => {
     const noScoreResponse = structuredClone(validResponse);
-    delete noScoreResponse.events[0].competitions[0].competitors[0].score;
-    delete noScoreResponse.events[0].competitions[0].competitors[1].score;
+    delete (noScoreResponse.events[0].competitions[0].competitors[0] as { score?: unknown }).score;
+    delete (noScoreResponse.events[0].competitions[0].competitors[1] as { score?: unknown }).score;
 
     vi.stubGlobal(
       "fetch",
@@ -193,7 +193,7 @@ describe("fetchESPNScoreboard", () => {
 
   it("handles competitor without winner field (optional)", async () => {
     const noWinnerResponse = structuredClone(validResponse);
-    delete noWinnerResponse.events[0].competitions[0].competitors[0].winner;
+    delete (noWinnerResponse.events[0].competitions[0].competitors[0] as { winner?: unknown }).winner;
 
     vi.stubGlobal(
       "fetch",

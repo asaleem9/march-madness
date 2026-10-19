@@ -12,6 +12,9 @@ describe("sanitizeError", () => {
     expect(
       sanitizeError('duplicate key value violates unique constraint "brackets_user_id_key"')
     ).toBe("You already have a bracket");
+    expect(
+      sanitizeError('duplicate key value violates unique constraint "brackets_one_per_user"')
+    ).toBe("You already have a bracket");
   });
 
   it("maps duplicate key on bracket_picks", () => {

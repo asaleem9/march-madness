@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v4";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/db";
+import { emailWaitlist } from "@/db/schema";
 import { isAdminUser } from "@/lib/admin-auth";
 import { getEmailFrom } from "@/lib/notifications";
 import { sanitizeError } from "@/lib/sanitizeError";
@@ -36,15 +37,19 @@ export async function POST(request: NextRequest) {
   }
   const { subject, text, dryRun } = parsed.data;
 
-  const admin = createAdminClient();
-  const { data: rows, error } = await admin.from("email_waitlist").select("email");
-  if (error) {
-    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
+  let rows: { email: string }[];
+  try {
+    rows = await db.select({ email: emailWaitlist.email }).from(emailWaitlist);
+  } catch (err) {
+    return NextResponse.json(
+      { error: sanitizeError(err instanceof Error ? err.message : null) },
+      { status: 500 }
+    );
   }
 
   const recipients = Array.from(
     new Set(
-      (rows ?? [])
+      rows
         .map((r) => (typeof r.email === "string" ? r.email.trim().toLowerCase() : ""))
         .filter((e) => e.includes("@"))
     )

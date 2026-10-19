@@ -6,8 +6,10 @@
  *   npm run db:import-json -- --year 2027 file1.json file2.json [--dry-run] [--expected-teams 76 --expected-opening 12]
  */
 import fs from "node:fs";
-import { createClient } from "@supabase/supabase-js";
 import * as dotenv from "dotenv";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import * as schema from "../src/db/schema";
 import { parseESPNScoreboard } from "../src/lib/espn";
 import { classifyScoreboards, buildImportPlan } from "../src/lib/bracket-import";
 import { applyImportPlan } from "../src/lib/bracket-import-apply";
@@ -53,12 +55,20 @@ async function main() {
     console.log("\nDry run; nothing written.");
     return;
   }
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-  const result = await applyImportPlan(supabase, plan);
-  console.log("\nWritten:", result);
+
+  const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+  if (!url) {
+    console.error("DATABASE_URL_UNPOOLED (or DATABASE_URL) is required");
+    process.exit(1);
+  }
+  const sql = postgres(url, { max: 1, prepare: false });
+  const db = drizzle(sql, { schema });
+  try {
+    const result = await applyImportPlan(db, plan);
+    console.log("\nWritten:", result);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
 
 main().catch((err) => {

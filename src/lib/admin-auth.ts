@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth/session";
 
 /** Emails allowed to use the admin page and admin API routes (comma-separated env var). */
 export function getAdminEmails(): string[] {
@@ -16,10 +16,7 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 
 /** True when the current session belongs to an admin (reads the auth cookie). */
 export async function isAdminUser(): Promise<boolean> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   return isAdminEmail(user?.email);
 }
 

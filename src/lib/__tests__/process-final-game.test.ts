@@ -1,43 +1,86 @@
-import { describe, it, expect } from "vitest";
-import { createRecordingClient } from "@/test/helpers";
+// @vitest-environment node
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { eq, asc } from "drizzle-orm";
+import type { Db } from "@/db";
+import { bracketPicks, brackets, games, notificationQueue, teams } from "@/db/schema";
+import { createTestDb, seedProfile, seedUserId, type TestDb } from "@/test/db";
 import { processFinalGame, pointsForWin, type FinalGameRow } from "../process-final-game";
-import type { SupabaseClient } from "@supabase/supabase-js";
+
+let testDb: TestDb;
+let db: Db;
+
+const u1 = seedUserId(1);
+const u2 = seedUserId(2);
+const u3 = seedUserId(3);
+const b1 = "10000000-0000-4000-8000-000000000001";
+const b2 = "10000000-0000-4000-8000-000000000002";
+const b3 = "10000000-0000-4000-8000-000000000003";
 
 const game: FinalGameRow = {
-  id: 7,
-  game_slot: 13,
+  id: 0, // set after seeding
+  gameSlot: 13,
   round: "first_round",
   region: "east",
-  team_a_id: 1,
-  team_b_id: 2,
-  next_game_slot: 45,
-  slot_position: "top",
-  team_a: { id: 1, name: "Duke", seed: 1 },
-  team_b: { id: 2, name: "Siena", seed: 16 },
+  teamAId: 1,
+  teamBId: 2,
+  nextGameSlot: 45,
+  slotPosition: "top",
+  teamA: { id: 1, name: "Duke", seed: 1 },
+  teamB: { id: 2, name: "Siena", seed: 16 },
 };
 
-const picks = [
-  { id: 101, bracket_id: "b1", picked_team_id: 1, is_correct: null, points_earned: 0, brackets: { user_id: "u1" } },
-  { id: 102, bracket_id: "b2", picked_team_id: 2, is_correct: null, points_earned: 0, brackets: { user_id: "u2" } },
-  { id: 103, bracket_id: "b3", picked_team_id: 1, is_correct: true, points_earned: 10, brackets: { user_id: "u3" } }, // already scored
-];
-const allPicks = [
-  { bracket_id: "b1", points_earned: 10 },
-  { bracket_id: "b1", points_earned: 20 },
-  { bracket_id: "b2", points_earned: 0 },
-];
+async function reset() {
+  await testDb.delete(notificationQueue);
+  await testDb.delete(bracketPicks);
+  await testDb.delete(brackets);
+  await testDb.delete(games);
+  await testDb.delete(teams);
 
-function client() {
-  return createRecordingClient((table, chain) => {
-    if (table === "bracket_picks") {
-      const sel = chain.find((c) => c.method === "select");
-      const cols = String(sel?.args[0] ?? "");
-      if (cols.includes("brackets!inner")) return picks;
-      if (cols.includes("points_earned")) return allPicks;
-    }
-    return null;
-  });
+  await testDb.insert(teams).values([
+    { id: 1, name: "Duke", abbreviation: "DUKE", seed: 1, region: "east" },
+    { id: 2, name: "Siena", abbreviation: "SIE", seed: 16, region: "east" },
+    { id: 3, name: "Texas", abbreviation: "TEX", seed: 11, region: "east" },
+    { id: 4, name: "NC State", abbreviation: "NCST", seed: 11, region: "east" },
+  ]);
+  const [g13] = await testDb
+    .insert(games)
+    .values([
+      { gameSlot: 13, round: "first_round", region: "east", teamAId: 1, teamBId: 2, nextGameSlot: 45, slotPosition: "top", status: "final" },
+      { gameSlot: 14, round: "first_round", region: "east", teamAId: null, teamBId: null, nextGameSlot: 45, slotPosition: "bottom" },
+      { gameSlot: 45, round: "second_round", region: "east", nextGameSlot: 61, slotPosition: "top" },
+      { gameSlot: 1, round: "first_four", region: "east", teamAId: 3, teamBId: 4, nextGameSlot: 25, slotPosition: "bottom" },
+      { gameSlot: 25, round: "first_round", region: "west", nextGameSlot: 51, slotPosition: "top" },
+      { gameSlot: 75, round: "championship", region: null, teamAId: 1, teamBId: 2 },
+    ])
+    .returning({ id: games.id });
+  game.id = g13.id;
+
+  await testDb.insert(brackets).values([
+    { id: b1, userId: u1, name: "One", locked: true },
+    { id: b2, userId: u2, name: "Two", locked: true },
+    { id: b3, userId: u3, name: "Three", locked: true },
+  ]);
+  await testDb.insert(bracketPicks).values([
+    // slot 13 picks: u1 right, u2 wrong, u3 already scored
+    { bracketId: b1, gameSlot: 13, round: "first_round", pickedTeamId: 1 },
+    { bracketId: b2, gameSlot: 13, round: "first_round", pickedTeamId: 2 },
+    { bracketId: b3, gameSlot: 13, round: "first_round", pickedTeamId: 1, isCorrect: true, pointsEarned: 10 },
+    // a previously scored second-round pick on b1 so totals add up
+    { bracketId: b1, gameSlot: 45, round: "second_round", pickedTeamId: 1, isCorrect: true, pointsEarned: 20 },
+    // play-in carry: u1 picked Texas (3) to win slot 25 and slot 51
+    { bracketId: b1, gameSlot: 25, round: "first_round", pickedTeamId: 3 },
+    { bracketId: b1, gameSlot: 51, round: "second_round", pickedTeamId: 3 },
+    { bracketId: b2, gameSlot: 25, round: "first_round", pickedTeamId: 4 },
+  ]);
 }
+
+beforeAll(async () => {
+  testDb = await createTestDb();
+  db = testDb as unknown as Db;
+  for (const id of [u1, u2, u3]) await seedProfile(testDb, { id, displayName: `user-${id.slice(-2)}` });
+});
+
+beforeEach(reset);
 
 describe("pointsForWin", () => {
   it("applies the 1.5x upset bonus only when the worse seed wins", () => {
@@ -49,69 +92,119 @@ describe("pointsForWin", () => {
 
 describe("processFinalGame", () => {
   it("eliminates, advances, scores changed picks, recalculates and notifies", async () => {
-    const c = client();
-    const r = await processFinalGame(c as unknown as SupabaseClient, {
+    const r = await processFinalGame(db, {
       game, winnerId: 1, scoreA: 80, scoreB: 60, notify: true, batchKey: "20270318-evening",
     });
 
-    const elim = c.updates("teams")[0];
-    expect(elim.args[0]).toEqual({ eliminated: true });
-    expect(c.filtersAfter(elim)[0].args).toEqual(["id", 2]);
+    const siena = await testDb.query.teams.findFirst({ where: eq(teams.id, 2) });
+    expect(siena?.eliminated).toBe(true);
+    const duke = await testDb.query.teams.findFirst({ where: eq(teams.id, 1) });
+    expect(duke?.eliminated).toBe(false);
 
-    const adv = c.updates("games")[0];
-    expect(adv.args[0]).toEqual({ team_a_id: 1 });
-    expect(c.filtersAfter(adv)[0].args).toEqual(["game_slot", 45]);
+    const next = await testDb.query.games.findFirst({ where: eq(games.gameSlot, 45) });
+    expect(next?.teamAId).toBe(1);
+    expect(next?.teamBId).toBeNull();
 
     // Only the two unscored picks are written; the already-correct one is left alone.
-    const pickUpdates = c.updates("bracket_picks");
-    expect(pickUpdates.map((u) => u.args[0])).toEqual([
-      { is_correct: true, points_earned: 10 },
-      { is_correct: false, points_earned: 0 },
-    ]);
     expect(r.picksScored).toBe(2);
+    const slotPicks = await testDb
+      .select({ bracketId: bracketPicks.bracketId, isCorrect: bracketPicks.isCorrect, pointsEarned: bracketPicks.pointsEarned })
+      .from(bracketPicks)
+      .where(eq(bracketPicks.gameSlot, 13))
+      .orderBy(asc(bracketPicks.id));
+    expect(slotPicks).toEqual([
+      { bracketId: b1, isCorrect: true, pointsEarned: 10 },
+      { bracketId: b2, isCorrect: false, pointsEarned: 0 },
+      { bracketId: b3, isCorrect: true, pointsEarned: 10 },
+    ]);
 
-    const scoreUpdates = c.updates("brackets").map((u) => u.args[0]);
-    expect(scoreUpdates).toEqual([{ score: 30 }, { score: 0 }]);
-    expect(r.bracketsRecalculated).toBe(2);
+    const scores = await testDb.select({ id: brackets.id, score: brackets.score }).from(brackets).orderBy(asc(brackets.id));
+    expect(scores).toEqual([
+      { id: b1, score: 30 },
+      { id: b2, score: 0 },
+      { id: b3, score: 10 },
+    ]);
+    expect(r.bracketsRecalculated).toBe(3);
 
-    const queued = c.inserts("notification_queue")[0].args[0] as Record<string, unknown>[];
+    const queued = await testDb.select().from(notificationQueue).orderBy(asc(notificationQueue.id));
     expect(queued).toHaveLength(3);
     expect(queued[0]).toMatchObject({
-      user_id: "u1", type: "game_result", batch_key: "20270318-evening",
-      payload: { winner: "Duke", loser: "Siena", score: "80-60", picked: "Duke", correct: true, points: 10, round: "first_round" },
+      userId: u1, type: "game_result", batchKey: "20270318-evening", sent: false,
+      payload: { game_id: game.id, winner: "Duke", loser: "Siena", score: "80-60", picked: "Duke", correct: true, points: 10, round: "first_round", winner_seed: 1, loser_seed: 16 },
     });
     expect(queued[1].payload).toMatchObject({ picked: "Siena", correct: false, points: 0 });
     expect(r.notificationsQueued).toBe(3);
   });
 
+  it("is idempotent: a second run changes nothing and scores nothing", async () => {
+    await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60, notify: true });
+    const r = await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60, notify: false });
+    expect(r.picksScored).toBe(0);
+    const scores = await testDb.select({ score: brackets.score }).from(brackets).orderBy(asc(brackets.id));
+    expect(scores.map((s) => s.score)).toEqual([30, 0, 10]);
+    expect(await testDb.select().from(notificationQueue)).toHaveLength(3);
+  });
+
+  it("re-scores picks when a correction flips the winner", async () => {
+    await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60 });
+    const r = await processFinalGame(db, { game, winnerId: 2, scoreA: 60, scoreB: 80 });
+    expect(r.picksScored).toBe(3);
+    const slotPicks = await testDb
+      .select({ bracketId: bracketPicks.bracketId, isCorrect: bracketPicks.isCorrect, pointsEarned: bracketPicks.pointsEarned })
+      .from(bracketPicks)
+      .where(eq(bracketPicks.gameSlot, 13))
+      .orderBy(asc(bracketPicks.id));
+    // 16 over 1 is an upset: 10 × 1.5
+    expect(slotPicks).toEqual([
+      { bracketId: b1, isCorrect: false, pointsEarned: 0 },
+      { bracketId: b2, isCorrect: true, pointsEarned: 15 },
+      { bracketId: b3, isCorrect: false, pointsEarned: 0 },
+    ]);
+    const next = await testDb.query.games.findFirst({ where: eq(games.gameSlot, 45) });
+    expect(next?.teamAId).toBe(2);
+  });
+
   it("does not queue notifications when notify is false", async () => {
-    const c = client();
-    const r = await processFinalGame(c as unknown as SupabaseClient, { game, winnerId: 1, scoreA: 1, scoreB: 0, notify: false });
-    expect(c.inserts("notification_queue")).toHaveLength(0);
+    const r = await processFinalGame(db, { game, winnerId: 1, scoreA: 1, scoreB: 0, notify: false });
+    expect(await testDb.select().from(notificationQueue)).toHaveLength(0);
     expect(r.notificationsQueued).toBe(0);
   });
 
   it("rewrites every pick of a play-in loser to the winner", async () => {
-    const c = client();
-    await processFinalGame(c as unknown as SupabaseClient, {
-      game: { ...game, round: "first_four", game_slot: 1, next_game_slot: 25, slot_position: "bottom", team_a: { id: 1, name: "Texas", seed: 11 }, team_b: { id: 2, name: "NC State", seed: 11 } },
-      winnerId: 2, scoreA: 60, scoreB: 70,
+    const playIn = await testDb.query.games.findFirst({
+      where: eq(games.gameSlot, 1),
+      with: { teamA: true, teamB: true },
     });
-    const swap = c.updates("bracket_picks").find((u) => (u.args[0] as Record<string, unknown>).picked_team_id === 2)!;
-    expect(swap).toBeDefined();
-    const filters = c.filtersAfter(swap);
-    expect(filters).toHaveLength(1);
-    expect(filters[0].args).toEqual(["picked_team_id", 1]);
-    const adv = c.updates("games")[0];
-    expect(adv.args[0]).toEqual({ team_b_id: 2 });
+    const r = await processFinalGame(db, {
+      game: playIn!,
+      winnerId: 4, scoreA: 60, scoreB: 70,
+    });
+    expect(r.loserId).toBe(3);
+
+    const carried = await testDb
+      .select({ gameSlot: bracketPicks.gameSlot, pickedTeamId: bracketPicks.pickedTeamId })
+      .from(bracketPicks)
+      .where(eq(bracketPicks.bracketId, b1))
+      .orderBy(asc(bracketPicks.gameSlot));
+    // Both of u1's Texas picks (slots 25 and 51) now point at NC State; other picks are untouched.
+    expect(carried).toEqual([
+      { gameSlot: 13, pickedTeamId: 1 },
+      { gameSlot: 25, pickedTeamId: 4 },
+      { gameSlot: 45, pickedTeamId: 1 },
+      { gameSlot: 51, pickedTeamId: 4 },
+    ]);
+    const adv = await testDb.query.games.findFirst({ where: eq(games.gameSlot, 25) });
+    expect(adv?.teamBId).toBe(4);
+    expect(adv?.teamAId).toBeNull();
   });
 
   it("skips advancement for the championship", async () => {
-    const c = client();
-    await processFinalGame(c as unknown as SupabaseClient, {
-      game: { ...game, round: "championship", game_slot: 75, next_game_slot: null, slot_position: null },
+    const before = await testDb.select().from(games).orderBy(asc(games.gameSlot));
+    await processFinalGame(db, {
+      game: { ...game, round: "championship", gameSlot: 75, nextGameSlot: null, slotPosition: null },
       winnerId: 1, scoreA: 1, scoreB: 0,
     });
-    expect(c.updates("games")).toHaveLength(0);
+    const after = await testDb.select().from(games).orderBy(asc(games.gameSlot));
+    expect(after).toEqual(before);
   });
 });

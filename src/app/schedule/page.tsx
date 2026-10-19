@@ -1,60 +1,78 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { asc, eq, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { bracketPicks, brackets, games } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getTournamentConfig } from "@/lib/tournament";
-import { ScheduleClient, type ScheduleGame } from "@/components/schedule/ScheduleClient";
+import {
+  ScheduleClient,
+  type ScheduleGame,
+  type ScheduleTeam,
+} from "@/components/schedule/ScheduleClient";
 
 export const metadata: Metadata = { title: "Schedule" };
 export const dynamic = "force-dynamic";
 
-export default async function SchedulePage() {
-  const supabase = await createClient();
-  const adminSupabase = createAdminClient();
+function toScheduleTeam(
+  t: { id: number; name: string; seed: number; abbreviation: string; logoUrl: string | null; eliminated: boolean | null } | null
+): ScheduleTeam | null {
+  if (!t) return null;
+  return {
+    id: t.id,
+    name: t.name,
+    seed: t.seed,
+    abbreviation: t.abbreviation,
+    logo_url: t.logoUrl,
+    eliminated: t.eliminated,
+  };
+}
 
-  const [
-    {
-      data: { user },
-    },
-    config,
-    { data: games, error: gamesError },
-  ] = await Promise.all([
-    supabase.auth.getUser(),
+export default async function SchedulePage() {
+  // The schedule is public; the session only decides whether picks are highlighted.
+  const [user, config, gameRows] = await Promise.all([
+    getCurrentUser(),
     getTournamentConfig(),
-    // Admin client so logged-out visitors can view the schedule too.
-    adminSupabase
-      .from("games")
-      .select(
-        `
-        *,
-        team_a:teams!team_a_id(*),
-        team_b:teams!team_b_id(*)
-      `
-      )
-      .order("scheduled_at", { ascending: true, nullsFirst: false })
-      .order("game_slot", { ascending: true }),
+    db.query.games.findMany({
+      with: { teamA: true, teamB: true },
+      orderBy: [sql`${games.scheduledAt} asc nulls last`, asc(games.gameSlot)],
+    }),
   ]);
-  if (gamesError) throw new Error(`Failed to load schedule: ${gamesError.message}`);
+
+  const scheduleGames: ScheduleGame[] = gameRows.map((g) => ({
+    id: g.id,
+    round: g.round,
+    region: g.region,
+    game_slot: g.gameSlot,
+    team_a_id: g.teamAId,
+    team_b_id: g.teamBId,
+    winner_id: g.winnerId,
+    status: g.status,
+    score_a: g.scoreA,
+    score_b: g.scoreB,
+    scheduled_at: g.scheduledAt?.toISOString() ?? null,
+    espn_game_id: g.espnGameId,
+    clock: g.clock,
+    period: g.period,
+    team_a: toScheduleTeam(g.teamA),
+    team_b: toScheduleTeam(g.teamB),
+  }));
 
   // The current user's picks, so their team is highlighted on each matchup.
   const userPicks: Record<number, number> = {};
   if (user) {
-    const { data: bracket, error: bracketError } = await supabase
-      .from("brackets")
-      .select("id")
-      .eq("user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-    if (bracketError) throw new Error(`Failed to load bracket: ${bracketError.message}`);
+    const [bracket] = await db
+      .select({ id: brackets.id })
+      .from(brackets)
+      .where(eq(brackets.userId, user.id))
+      .limit(1);
 
     if (bracket) {
-      const { data: picks, error: picksError } = await supabase
-        .from("bracket_picks")
-        .select("game_slot, picked_team_id")
-        .eq("bracket_id", bracket.id);
-      if (picksError) throw new Error(`Failed to load picks: ${picksError.message}`);
-
-      for (const p of picks ?? []) {
-        userPicks[p.game_slot] = p.picked_team_id;
+      const picks = await db
+        .select({ gameSlot: bracketPicks.gameSlot, pickedTeamId: bracketPicks.pickedTeamId })
+        .from(bracketPicks)
+        .where(eq(bracketPicks.bracketId, bracket.id));
+      for (const p of picks) {
+        userPicks[p.gameSlot] = p.pickedTeamId;
       }
     }
   }
@@ -68,7 +86,7 @@ export default async function SchedulePage() {
           : "Log in to see your bracket picks on each matchup."}
       </p>
       <ScheduleClient
-        games={(games ?? []) as unknown as ScheduleGame[]}
+        games={scheduleGames}
         userPicks={userPicks}
         isLoggedIn={!!user}
         lastUpdatedAt={config?.last_score_update_at ?? null}

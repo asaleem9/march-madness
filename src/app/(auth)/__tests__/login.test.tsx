@@ -6,24 +6,30 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 // ---------------------------------------------------------------------------
 
 const mockPush = vi.fn();
+const mockRefresh = vi.fn();
 const mockSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
   useSearchParams: () => mockSearchParams,
 }));
 
-const mockSignInWithPassword = vi.fn();
-const mockSignInWithOAuth = vi.fn();
-const mockResend = vi.fn();
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({
-    auth: {
-      signInWithPassword: mockSignInWithPassword,
-      signInWithOAuth: mockSignInWithOAuth,
-      resend: mockResend,
+const mockSignInEmail = vi.fn();
+const mockSignInSocial = vi.fn();
+vi.mock("@/lib/auth/client", () => ({
+  authClient: {
+    useSession: vi.fn(),
+    signOut: vi.fn(),
+    signIn: {
+      email: (...args: unknown[]) => mockSignInEmail(...args),
+      social: (...args: unknown[]) => mockSignInSocial(...args),
     },
-  }),
+    signUp: { email: vi.fn() },
+    requestPasswordReset: vi.fn(),
+    resetPassword: vi.fn(),
+    updateUser: vi.fn(),
+    changePassword: vi.fn(),
+  },
 }));
 
 vi.mock("next/link", () => ({
@@ -43,7 +49,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import LoginPage from "../login/page";
+import { LoginForm } from "../_components/LoginForm";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,19 +62,18 @@ function fillAndSubmit(email: string, password: string) {
   fireEvent.change(screen.getByPlaceholderText("Enter your password"), {
     target: { value: password },
   });
-  fireEvent.click(screen.getByRole("button", { name: /log in/i }));
+  fireEvent.click(screen.getByRole("button", { name: /^log in$/i }));
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("LoginPage", () => {
+describe("LoginForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSignInWithPassword.mockResolvedValue({ error: null });
-    mockSignInWithOAuth.mockResolvedValue({ error: null });
-    mockResend.mockResolvedValue({ error: null });
+    mockSignInEmail.mockResolvedValue({ data: {}, error: null });
+    mockSignInSocial.mockResolvedValue({ data: {}, error: null });
 
     // Reset search params to default (no redirect / error param)
     mockSearchParams.delete("redirect");
@@ -76,33 +81,39 @@ describe("LoginPage", () => {
   });
 
   it("renders email and password form fields", () => {
-    render(<LoginPage />);
+    render(<LoginForm />);
 
-    expect(
-      screen.getByPlaceholderText("your@email.com"),
-    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /log in/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^log in$/i })).toBeInTheDocument();
   });
 
-  it("calls signInWithPassword with email and password", async () => {
-    render(<LoginPage />);
+  it("signs in with email and password", async () => {
+    render(<LoginForm />);
     fillAndSubmit("user@test.com", "secret123");
 
     await waitFor(() => {
-      expect(mockSignInWithPassword).toHaveBeenCalledWith({
+      expect(mockSignInEmail).toHaveBeenCalledWith({
         email: "user@test.com",
         password: "secret123",
       });
     });
   });
 
+  it("goes to the dashboard by default and refreshes the server layout", async () => {
+    render(<LoginForm />);
+    fillAndSubmit("user@test.com", "secret123");
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/dashboard");
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
   it("redirects to the redirect search param on success", async () => {
     mockSearchParams.set("redirect", "/bracket/edit");
 
-    render(<LoginPage />);
+    render(<LoginForm />);
     fillAndSubmit("user@test.com", "secret123");
 
     await waitFor(() => {
@@ -110,79 +121,85 @@ describe("LoginPage", () => {
     });
   });
 
-  it("shows error on authentication failure", async () => {
-    mockSignInWithPassword.mockResolvedValue({
-      error: { message: "Invalid login credentials" },
-    });
+  it("ignores an unsafe redirect param", async () => {
+    mockSearchParams.set("redirect", "https://evil.example/phish");
 
-    render(<LoginPage />);
-    fillAndSubmit("user@test.com", "wrong");
-
-    await waitFor(() => {
-      expect(
-        screen.getByText("Invalid login credentials"),
-      ).toBeInTheDocument();
-    });
-
-    expect(mockPush).not.toHaveBeenCalled();
-  });
-
-  it("shows loading state during submission", async () => {
-    let resolveSignIn!: (value: { error: null }) => void;
-    mockSignInWithPassword.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSignIn = resolve;
-      }),
-    );
-
-    render(<LoginPage />);
+    render(<LoginForm />);
     fillAndSubmit("user@test.com", "secret123");
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /logging in\.\.\./i }),
-      ).toBeInTheDocument();
+      expect(mockPush).toHaveBeenCalledWith("/dashboard");
+    });
+  });
+
+  it("shows error on authentication failure", async () => {
+    mockSignInEmail.mockResolvedValue({
+      data: null,
+      error: { message: "Invalid email or password" },
+    });
+
+    render(<LoginForm />);
+    fillAndSubmit("user@test.com", "wrong");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid email or password");
+    expect(mockPush).not.toHaveBeenCalled();
+    // Re-enabled so the user can retry.
+    expect(screen.getByRole("button", { name: /^log in$/i })).not.toBeDisabled();
+  });
+
+  it("shows loading state during submission", async () => {
+    let resolveSignIn!: (value: { data: unknown; error: null }) => void;
+    mockSignInEmail.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSignIn = resolve;
+      })
+    );
+
+    render(<LoginForm />);
+    fillAndSubmit("user@test.com", "secret123");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /logging in\.\.\./i })).toBeDisabled();
     });
 
     // Resolve to avoid act() warning
-    resolveSignIn({ error: null });
+    resolveSignIn({ data: {}, error: null });
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalled();
     });
   });
 
-  it("passes correct redirectTo to Google OAuth", async () => {
+  it("starts Google sign-in with a /callback URL that carries the redirect", async () => {
     mockSearchParams.set("redirect", "/wagers");
 
-    render(<LoginPage />);
-    fireEvent.click(
-      screen.getByRole("button", { name: /sign in with google/i }),
-    );
+    render(<LoginForm />);
+    fireEvent.click(screen.getByRole("button", { name: /sign in with google/i }));
 
     await waitFor(() => {
-      expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      expect(mockSignInSocial).toHaveBeenCalledWith({
         provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
-        },
+        callbackURL: `${window.location.origin}/callback?redirect=${encodeURIComponent("/wagers")}`,
       });
     });
+    // On success the browser navigates away; the button stays disabled meanwhile.
+    expect(screen.getByRole("button", { name: /redirecting to google/i })).toBeDisabled();
   });
 
   it("links every input to a label and links to forgot-password", () => {
-    render(<LoginPage />);
+    render(<LoginForm />);
 
     expect(screen.getByLabelText("EMAIL")).toHaveAttribute("id", "login-email");
     expect(screen.getByLabelText("PASSWORD")).toHaveAttribute("id", "login-password");
     expect(screen.getByRole("link", { name: /forgot password/i })).toHaveAttribute(
       "href",
-      "/forgot-password",
+      "/forgot-password"
     );
+    expect(screen.getByRole("link", { name: /sign up/i })).toHaveAttribute("href", "/signup");
   });
 
   it("toggles password visibility with an aria-pressed button", () => {
-    render(<LoginPage />);
+    render(<LoginForm />);
     const input = screen.getByPlaceholderText("Enter your password");
     const toggle = screen.getByRole("button", { name: /show password/i });
 
@@ -194,65 +211,28 @@ describe("LoginPage", () => {
     expect(input).toHaveAttribute("type", "text");
     expect(screen.getByRole("button", { name: /hide password/i })).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "true"
     );
   });
 
   it("shows the Google failure message from ?error=auth_failed", () => {
     mockSearchParams.set("error", "auth_failed");
 
-    render(<LoginPage />);
+    render(<LoginForm />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Google sign-in failed — try again",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Google sign-in failed — try again");
   });
 
-  it("disables the Google button while redirecting and surfaces OAuth errors", async () => {
-    mockSignInWithOAuth.mockResolvedValue({
+  it("surfaces OAuth errors and re-enables the Google button", async () => {
+    mockSignInSocial.mockResolvedValue({
+      data: null,
       error: { message: "Provider is not enabled" },
     });
 
-    render(<LoginPage />);
-    const google = screen.getByRole("button", { name: /sign in with google/i });
-    fireEvent.click(google);
+    render(<LoginForm />);
+    fireEvent.click(screen.getByRole("button", { name: /sign in with google/i }));
 
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("Provider is not enabled");
-    });
-    // Re-enabled after the failure so the user can retry.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider is not enabled");
     expect(screen.getByRole("button", { name: /sign in with google/i })).not.toBeDisabled();
-  });
-
-  it("offers to resend the confirmation email when the account is not confirmed", async () => {
-    mockSignInWithPassword.mockResolvedValue({
-      error: { message: "Email not confirmed" },
-    });
-
-    render(<LoginPage />);
-    fillAndSubmit("new@test.com", "secret123");
-
-    const resend = await screen.findByRole("button", { name: /resend email/i });
-    fireEvent.click(resend);
-
-    await waitFor(() => {
-      expect(mockResend).toHaveBeenCalledWith({ type: "signup", email: "new@test.com" });
-    });
-    // Cooldown kicks in after a successful resend.
-    expect(
-      await screen.findByRole("button", { name: /resend in 60s/i }),
-    ).toBeDisabled();
-  });
-
-  it("does not show the resend button for other login errors", async () => {
-    mockSignInWithPassword.mockResolvedValue({
-      error: { message: "Invalid login credentials" },
-    });
-
-    render(<LoginPage />);
-    fillAndSubmit("user@test.com", "wrong");
-
-    await screen.findByRole("alert");
-    expect(screen.queryByRole("button", { name: /resend/i })).not.toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@
 
 This document defines the full test suite for the March Madness Bracket Challenge app. Tests are organized by layer (unit, integration, API, database, E2E) and module. Each test case includes the scenario, expected behavior, and relevant source file references.
 
-**Test Framework**: Vitest (unit/integration; `createRecordingClient` in `src/test/helpers.ts` mocks Supabase) + Playwright (E2E) + Supabase local dev (database)
+**Test Framework**: Vitest (unit/integration; `createTestDb()` in `src/test/db.ts` runs a real in-memory Postgres via PGlite with the Drizzle migrations applied) + Playwright (E2E)
 
 ---
 
@@ -306,7 +306,7 @@ This document defines the full test suite for the March Madness Bracket Challeng
 
 ## 2. API Route Tests
 
-All API tests use mocked Supabase clients. Test both successful and error paths.
+All API tests run against the PGlite test database (`vi.mock("@/db")`) with the session stubbed via `@/lib/auth/session`. Test both successful and error paths.
 
 ### 2.1 Brackets API
 
@@ -430,7 +430,7 @@ All API tests use mocked Supabase clients. Test both successful and error paths.
 | 1 | Unauthenticated user | 401 | Unauthorized |
 | 2 | Valid subscription upserted | 200 | `{ success: true }` |
 | 3 | Replaces existing subscription (same user_id) | 200 | Upsert on conflict |
-| 4 | Supabase error on insert | 500 | Error returned |
+| 4 | Database error on insert | 500 | Error returned |
 
 ### 2.6 Admin Scores
 
@@ -459,7 +459,7 @@ All API tests use mocked Supabase clients. Test both successful and error paths.
 | 4 | PUT: admin updates bracket_lock_deadline | 200 | Deadline updated |
 | 5 | PUT: admin updates active_phase | 200 | Phase updated |
 | 6 | PUT: admin sends empty body | 200 | No-op (no error, just updates nothing) |
-| 7 | PUT: Supabase error | 500 | Error returned |
+| 7 | PUT: database error | 500 | Error returned |
 
 ### 2.8 VAPID Key Endpoint
 
@@ -475,7 +475,7 @@ All API tests use mocked Supabase clients. Test both successful and error paths.
 
 ### 3.1 Schema Integrity
 
-**File**: `src/db/schema.ts`, `supabase/migrations/00001_initial_schema.sql`
+**File**: `src/db/schema.ts`, `src/db/migrations/`
 
 | # | Test Case | Expected |
 |---|-----------|----------|
@@ -498,7 +498,7 @@ All API tests use mocked Supabase clients. Test both successful and error paths.
 
 ### 3.2 RLS Policies
 
-Test these against the Supabase local dev instance with actual JWT-authenticated requests.
+Authorization is enforced in route handlers (there are no database policies); cover it with route tests that stub `getCurrentUser()` as different users.
 
 | # | Test Case | Expected |
 |---|-----------|----------|
@@ -547,7 +547,7 @@ Test these against the Supabase local dev instance with actual JWT-authenticated
 
 ## 4. Middleware Tests
 
-**Files**: `src/middleware.ts`, `src/lib/supabase/middleware.ts`
+**Files**: `src/proxy.ts` (wraps the Neon Auth middleware)
 
 | # | Test Case | Expected |
 |---|-----------|----------|
@@ -564,14 +564,14 @@ Test these against the Supabase local dev instance with actual JWT-authenticated
 | 11 | Authenticated access to `/dashboard` → allowed | 200 |
 | 12 | Static assets (`.svg`, `.png`, etc.) bypass middleware | Matched by `config.matcher` exclusion |
 | 13 | `_next/static` requests bypass middleware | Excluded by matcher |
-| 14 | Session cookies are refreshed on each request | `supabaseResponse` has updated cookies |
+| 14 | Session cookies are refreshed on each request | Response carries updated `Set-Cookie` headers |
 | 15 | Redirect URL preserves full pathname | `/bracket/abc-123/` included in redirect param |
 
 ---
 
 ## 5. Integration Tests
 
-These tests require a running Supabase instance (local or test project) and exercise multiple modules together.
+These tests run on the PGlite test database and exercise multiple modules together.
 
 ### 5.1 Full Bracket Flow
 
@@ -681,7 +681,7 @@ Use Vitest + React Testing Library.
 | 1 | Shows app title | "March Madness" text visible |
 | 2 | Shows navigation links when logged in | Dashboard, Bracket, Leaderboard, etc. |
 | 3 | Shows Login/Sign Up when logged out | Auth links visible |
-| 4 | Logout button triggers sign out | Supabase signOut called |
+| 4 | Logout button triggers sign out | `authClient.signOut` called |
 
 ### HeroDynamic Component
 
@@ -697,7 +697,7 @@ Use Vitest + React Testing Library.
 
 ## 7. E2E Tests
 
-Use Playwright against a running dev server with Supabase local dev.
+Use Playwright against a running dev server pointed at a Neon dev branch (`neon checkout dev --create`).
 
 ### Authentication Flow
 
@@ -779,7 +779,7 @@ Use Playwright against a running dev server with Supabase local dev.
 | 5 | Concurrent bracket saves don't create duplicates | Unique constraint holds |
 | 6 | Remotion Player lazy load doesn't block initial page render | LCP under 2.5s |
 | 7 | Bundle size: main page JS under 200KB (gzipped) | Bundle analysis |
-| 8 | Supabase Realtime handles 50 concurrent subscriptions | No connection drops |
+| 8 | 50 open schedule tabs polling every 30 s | No errors, pooled connections stay under the limit |
 
 ---
 
@@ -788,19 +788,19 @@ Use Playwright against a running dev server with Supabase local dev.
 | # | Test Case | Expected |
 |---|-----------|----------|
 | 1 | CRON_SECRET not exposed to client | Only server-side env var |
-| 2 | SUPABASE_SERVICE_ROLE_KEY not exposed to client | Only NEXT_PUBLIC_ prefix vars client-accessible |
+| 2 | `DATABASE_URL` / `NEON_AUTH_COOKIE_SECRET` not exposed to client | Only NEXT_PUBLIC_ prefix vars client-accessible |
 | 3 | VAPID_PRIVATE_KEY not exposed to client | Server-only |
 | 4 | RLS prevents cross-user data access | User A cannot read User B's push subscriptions |
 | 5 | Admin routes check email against allowlist | Non-admin gets 403 |
 | 6 | Cron routes check Bearer token | Unauthenticated gets 401 |
 | 7 | Bracket API validates user ownership before update | Other user's bracket → 404 |
 | 8 | Wager API validates opponent_id on PATCH | Only actual opponent can respond |
-| 9 | SQL injection via Supabase client prevented | Parameterized queries by default |
+| 9 | SQL injection prevented | Drizzle parameterizes every query |
 | 10 | XSS via display_name or bracket name sanitized | HTML escaped in rendering |
-| 11 | CSRF protection via Supabase Auth (cookie + bearer) | Built-in protection |
+| 11 | CSRF protection via Neon Auth session cookies (SameSite=Lax, httpOnly) | Built-in protection |
 | 12 | Admin config PUT: prevent injection of arbitrary columns | Only expected fields accepted |
 | 13 | Push subscription endpoint validates subscription format | Malformed subscription handled |
-| 14 | Rate limiting on auth endpoints | Supabase auth rate limits applied (30/5min) |
+| 14 | Rate limiting on auth endpoints | Neon Auth rate limits applied |
 
 ---
 
@@ -814,7 +814,7 @@ These tests guard against specific bugs discovered or architectural decisions.
 | 2 | `web-push` lazy import doesn't crash at build time | VAPID key validation at import time | `getWebPush()` async function defers import |
 | 3 | `useSearchParams()` in login page wrapped in Suspense | Next.js error without Suspense boundary | LoginForm extracted, Suspense wrapper in page |
 | 4 | CSS `@import` order (Tailwind before Google Fonts) doesn't cause warnings | CSS spec violation | Google Fonts loaded via `<link>` in layout.tsx head |
-| 5 | Placeholder Supabase URL format is valid URL | Build fails with `your_supabase_url` | Placeholder is `https://placeholder.supabase.co` |
+| 5 | Build without `DATABASE_URL` | Build succeeds (connection is opened lazily at request time) | |
 | 6 | `currentPick.pickedTeamId !== teamId` (not `currentPick !== teamId`) | Type error: BracketPick is object not number | Object property comparison |
 | 7 | Turbopack config present (no `webpack` config key) | Next.js 16 errors on webpack without turbopack | `turbopack: {}` in next.config.ts |
 | 8 | `web-push` in serverExternalPackages | Build fails trying to bundle native modules | Listed in next.config.ts |
@@ -920,7 +920,7 @@ npx vitest run
 # Unit tests (watch mode)
 npx vitest
 
-# E2E tests (requires running dev server + Supabase local)
+# E2E tests (requires running dev server + a Neon dev branch)
 npx playwright test
 
 # Specific test file

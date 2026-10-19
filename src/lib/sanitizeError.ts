@@ -1,8 +1,8 @@
-// Maps raw database/Supabase errors to user-friendly messages.
+// Maps raw database errors to user-friendly messages.
 // Prevents leaking internal schema details or stack traces to the client.
 
 const ERROR_MAP: [RegExp, string][] = [
-  [/duplicate key.*brackets_user_id/, "You already have a bracket"],
+  [/duplicate key.*brackets_(user_id|one_per_user)/, "You already have a bracket"],
   [/duplicate key.*bracket_picks/, "A pick for this game already exists"],
   [/violates foreign key.*picked_team_id/, "Invalid team selection"],
   [/violates foreign key.*bracket_id/, "Bracket not found"],

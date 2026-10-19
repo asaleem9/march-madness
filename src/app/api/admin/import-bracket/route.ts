@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v4";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { ne } from "drizzle-orm";
+import { db } from "@/db";
+import { games } from "@/db/schema";
 import { authorizeCronOrAdmin } from "@/lib/admin-auth";
 import { fetchESPNScoreboard } from "@/lib/espn";
 import { classifyScoreboards, buildImportPlan } from "@/lib/bracket-import";
@@ -35,13 +37,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, { status: 400 });
   }
   const body = parsed.data;
-  const admin = createAdminClient();
 
-  const { data: config } = await admin
-    .from("tournament_config")
-    .select("year, final_four_pairing")
-    .eq("id", 1)
-    .maybeSingle();
+  const config = await db.query.tournamentConfig.findFirst({
+    columns: { year: true, finalFourPairing: true },
+  });
 
   const year = body.year ?? config?.year ?? new Date().getFullYear();
   const defaults = YEAR_DEFAULTS[year];
@@ -54,7 +53,7 @@ export async function POST(request: NextRequest) {
   }
   const finalFourPairing: FinalFourPairing =
     body.finalFourPairing ??
-    (config?.final_four_pairing as FinalFourPairing | null) ??
+    (config?.finalFourPairing as FinalFourPairing | null) ??
     defaults.finalFourPairing;
 
   const boards = await Promise.all(dates.map((d) => fetchESPNScoreboard(d)));
@@ -79,12 +78,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (!body.force) {
-    const { data: started } = await admin
-      .from("games")
-      .select("game_slot")
-      .neq("status", "scheduled")
+    const started = await db
+      .select({ gameSlot: games.gameSlot })
+      .from(games)
+      .where(ne(games.status, "scheduled"))
       .limit(1);
-    if (started && started.length > 0) {
+    if (started.length > 0) {
       return NextResponse.json(
         { error: "Games have already started; pass force:true to re-import structure anyway", report: plan.report },
         { status: 409 }
@@ -93,7 +92,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const written = await applyImportPlan(admin, plan);
+    const written = await applyImportPlan(db, plan);
     return NextResponse.json({ report: plan.report, written });
   } catch (err) {
     return NextResponse.json(

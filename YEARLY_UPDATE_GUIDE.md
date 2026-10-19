@@ -7,7 +7,7 @@ The app no longer needs a hand-edited team list. Each season is: run the rollove
 - [ ] Merge and push `main` (the push re-enables GitHub scheduled workflows, which GitHub disables after 60 idle days).
 - [ ] GitHub → Settings → Secrets and variables → Actions: add **`CRON_SECRET`** (same value as Vercel). Actions tab → "Tournament cron" → **Run workflow** once; both steps should return HTTP 200.
 - [ ] Vercel env: add **`EMAIL_FROM`** (a verified Resend sender) and confirm `RESEND_API_KEY`, `ADMIN_EMAILS`, VAPID keys.
-- [ ] Supabase: unpause the project (free tier pauses after ~7 idle days), then `supabase db push --linked` to apply `00009_2027_readiness.sql`.
+- [ ] Neon: `neon link` (if this machine isn't linked yet) and `npm run db:migrate` so prod has every Drizzle migration. Neon compute resumes on its own after idle; nothing to unpause.
 - [ ] Dry-run the importer against last year's real data to prove the pipeline end to end (admin page → Import from ESPN → "2026 replay" preset, or):
   ```bash
   curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" -H 'content-type: application/json' \
@@ -35,7 +35,7 @@ The app no longer needs a hand-edited team list. Each season is: run the rollove
 ## Opening Round — Tue Mar 16 / Wed Mar 17
 
 - [ ] GitHub Actions tab shows the cron running every 5 minutes.
-- [ ] After each play-in goes final, the winner appears in the first-round tile and `bracket_picks` for the loser are rewritten to the winner (check one in the Supabase table editor).
+- [ ] After each play-in goes final, the winner appears in the first-round tile and `bracket_picks` for the loser are rewritten to the winner (check one in the Neon console SQL editor).
 
 ## Lock — Thu Mar 18, 16:00Z
 
@@ -53,6 +53,6 @@ The app no longer needs a hand-edited team list. Each season is: run the rollove
 
 ## After
 
-- [ ] The 5-minute cron stops by itself after Apr 6. Daily Vercel crons and the keep-alive workflow keep the DB awake.
-- [ ] Optional: export `brackets`/`bracket_picks` from Supabase before next year's rollover wipes them.
+- [ ] The 5-minute cron stops by itself after Apr 6. The daily keep-alive workflow doubles as a database health check.
+- [ ] Optional: export `brackets`/`bracket_picks` (Neon console SQL editor or `pg_dump` with `DATABASE_URL_UNPOOLED`) before next year's rollover wipes them.
 - [ ] Next year: add a `YEAR_DEFAULTS[2028]` entry (Selection Sunday, dates, deadlines, ESPN dates) and repeat. Without it the off-season hero still says "Selection Sunday" but can't show the date.

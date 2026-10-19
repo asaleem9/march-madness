@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { db } from "@/db";
 import { authorizeCronOrAdmin } from "@/lib/admin-auth";
 import { lockBracketsPastDeadline } from "@/lib/lock-brackets";
 
@@ -8,6 +8,6 @@ export async function POST(request: NextRequest) {
   if (!(await authorizeCronOrAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const result = await lockBracketsPastDeadline(createAdminClient());
+  const result = await lockBracketsPastDeadline(db);
   return NextResponse.json(result);
 }

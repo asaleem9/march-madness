@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { and, desc, eq, ne, or } from "drizzle-orm";
+import { db } from "@/db";
+import { brackets, games, profiles, teams, userAchievements, wagers } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import {
   getScoringMultipliers,
   getSeason,
@@ -11,7 +14,7 @@ import {
 import { buildLeaderboard, maxPossiblePoints } from "@/lib/scoring";
 import { REQUIRED_PICKS, type YearDefaults } from "@/lib/tournament-structure";
 import { REGION_DISPLAY_NAMES, ROUND_DISPLAY_NAMES } from "@/lib/utils";
-import type { AchievementType, GameStatus, Region, Round, TournamentPhase } from "@/types";
+import type { TournamentPhase } from "@/types";
 import { BracketStatusCard } from "@/components/dashboard/BracketStatusCard";
 import { StandingCard, type ChampionPick } from "@/components/dashboard/StandingCard";
 import { TodaysGames, type TodayGameRow } from "@/components/dashboard/TodaysGames";
@@ -30,46 +33,10 @@ import {
   type PickLite,
 } from "@/components/dashboard/helpers";
 
+// Reads the session cookie, so it can never be prerendered.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = { title: "Dashboard" };
-
-interface TeamRow {
-  id: number;
-  name: string;
-  abbreviation: string;
-  seed: number;
-  logo_url: string | null;
-  eliminated: boolean | null;
-}
-
-interface GameRow {
-  id: number;
-  game_slot: number;
-  round: Round;
-  region: Region | null;
-  team_a_id: number | null;
-  team_b_id: number | null;
-  winner_id: number | null;
-  score_a: number | null;
-  score_b: number | null;
-  scheduled_at: string | null;
-  status: GameStatus;
-}
-
-interface BracketRow {
-  id: string;
-  name: string;
-  locked: boolean | null;
-  score: number | null;
-  bracket_picks: PickLite[] | null;
-}
-
-interface RankedBracketRow {
-  id: string;
-  user_id: string;
-  name: string;
-  score: number | null;
-  profiles: { display_name: string | null; avatar_url: string | null } | null;
-}
 
 function phaseLabel(phase: TournamentPhase): string {
   if (phase === "pre_tournament") return "Pre-tournament";
@@ -102,77 +69,107 @@ function introCopy(opts: {
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   if (!user) redirect("/login?redirect=/dashboard");
 
-  const [
-    season,
-    profileRes,
-    bracketRes,
-    rankedRes,
-    gamesRes,
-    teamsRes,
-    wagersRes,
-    achievementsRes,
-  ] = await Promise.all([
-    getSeason(),
-    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
-    supabase
-      .from("brackets")
-      .select(
-        "id, name, locked, score, bracket_picks(game_slot, round, picked_team_id, is_correct, points_earned)"
-      )
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    supabase
-      .from("brackets")
-      .select("id, user_id, name, score, profiles!inner(display_name, avatar_url)")
-      .eq("is_primary", true)
-      .eq("locked", true),
-    supabase
-      .from("games")
-      .select(
-        "id, game_slot, round, region, team_a_id, team_b_id, winner_id, score_a, score_b, scheduled_at, status"
-      )
-      .order("game_slot"),
-    supabase.from("teams").select("id, name, abbreviation, seed, logo_url, eliminated"),
-    supabase
-      .from("wagers")
-      .select(
-        "id, stakes, status, challenger_id, opponent_id, winner_id, challenger:profiles!challenger_id(display_name), opponent:profiles!opponent_id(display_name)"
-      )
-      .or(`challenger_id.eq.${user.id},opponent_id.eq.${user.id}`)
-      .neq("status", "declined")
-      .order("created_at", { ascending: false })
-      .limit(10),
-    supabase.from("user_achievements").select("achievement_type").eq("user_id", user.id),
-  ]);
+  // Queries throw on failure, which surfaces in error.tsx instead of an empty dashboard.
+  const [season, profile, bracket, ranked, gameRows, teamRows, wagerRows, achievementRows] =
+    await Promise.all([
+      getSeason(),
+      db.query.profiles.findFirst({
+        columns: { displayName: true },
+        where: eq(profiles.id, user.id),
+      }),
+      db.query.brackets.findFirst({
+        columns: { id: true, name: true, locked: true, score: true },
+        where: eq(brackets.userId, user.id),
+        with: {
+          picks: {
+            columns: {
+              gameSlot: true,
+              round: true,
+              pickedTeamId: true,
+              isCorrect: true,
+              pointsEarned: true,
+            },
+          },
+        },
+      }),
+      db.query.brackets.findMany({
+        columns: { id: true, userId: true, name: true, score: true },
+        where: and(eq(brackets.isPrimary, true), eq(brackets.locked, true)),
+        with: { user: { columns: { displayName: true, avatarUrl: true } } },
+      }),
+      db
+        .select({
+          id: games.id,
+          gameSlot: games.gameSlot,
+          round: games.round,
+          region: games.region,
+          teamAId: games.teamAId,
+          teamBId: games.teamBId,
+          winnerId: games.winnerId,
+          scoreA: games.scoreA,
+          scoreB: games.scoreB,
+          scheduledAt: games.scheduledAt,
+          status: games.status,
+        })
+        .from(games)
+        .orderBy(games.gameSlot),
+      db
+        .select({
+          id: teams.id,
+          name: teams.name,
+          abbreviation: teams.abbreviation,
+          seed: teams.seed,
+          logoUrl: teams.logoUrl,
+          eliminated: teams.eliminated,
+        })
+        .from(teams),
+      db.query.wagers.findMany({
+        columns: {
+          id: true,
+          stakes: true,
+          status: true,
+          challengerId: true,
+          opponentId: true,
+          winnerId: true,
+        },
+        where: and(
+          or(eq(wagers.challengerId, user.id), eq(wagers.opponentId, user.id)),
+          ne(wagers.status, "declined")
+        ),
+        with: {
+          challenger: { columns: { displayName: true } },
+          opponent: { columns: { displayName: true } },
+        },
+        orderBy: desc(wagers.createdAt),
+        limit: 10,
+      }),
+      db
+        .select({ achievementType: userAchievements.achievementType })
+        .from(userAchievements)
+        .where(eq(userAchievements.userId, user.id)),
+    ]);
 
-  // Surface query failures to error.tsx instead of rendering an empty dashboard.
-  for (const [label, res] of [
-    ["profile", profileRes],
-    ["bracket", bracketRes],
-    ["leaderboard", rankedRes],
-    ["games", gamesRes],
-    ["teams", teamsRes],
-    ["wagers", wagersRes],
-    ["achievements", achievementsRes],
-  ] as const) {
-    if (res.error) throw new Error(`Dashboard ${label} query failed: ${res.error.message}`);
-  }
-
-  const profile = profileRes.data as { display_name: string | null } | null;
-  const bracket = bracketRes.data as unknown as BracketRow | null;
-  const ranked = (rankedRes.data ?? []) as unknown as RankedBracketRow[];
-  const games = (gamesRes.data ?? []) as GameRow[];
-  const teams = (teamsRes.data ?? []) as TeamRow[];
-  const wagers = (wagersRes.data ?? []) as unknown as WagerRow[];
-  const earnedBadges = (achievementsRes.data ?? []).map(
-    (a) => a.achievement_type as AchievementType
-  );
+  // The dashboard widgets and pure helpers still take the row shapes they were
+  // written against, so adapt the Drizzle rows here rather than in each widget.
+  const gameList = gameRows.map((g) => ({
+    ...g,
+    scheduled_at: g.scheduledAt?.toISOString() ?? null,
+    winner_id: g.winnerId,
+  }));
+  const wagerList: WagerRow[] = wagerRows.map((w) => ({
+    id: w.id,
+    stakes: w.stakes,
+    status: w.status,
+    challenger_id: w.challengerId,
+    opponent_id: w.opponentId,
+    winner_id: w.winnerId,
+    challenger: w.challenger ? { display_name: w.challenger.displayName } : null,
+    opponent: w.opponent ? { display_name: w.opponent.displayName } : null,
+  }));
+  const earnedBadges = achievementRows.map((a) => a.achievementType);
 
   const { config, phase, tournamentYear: year, displayYear, upcoming } = season;
   const preLock = phase === "pre_tournament";
@@ -181,10 +178,16 @@ export default async function DashboardPage() {
   const pastWagerDeadline = isPastWagerDeadline(config);
   const multipliers = getScoringMultipliers(config);
 
-  const picks = bracket?.bracket_picks ?? [];
+  const picks: PickLite[] = (bracket?.picks ?? []).map((p) => ({
+    game_slot: p.gameSlot,
+    round: p.round,
+    picked_team_id: p.pickedTeamId,
+    is_correct: p.isCorrect,
+    points_earned: p.pointsEarned,
+  }));
   const pickCount = countRequiredPicks(picks);
   const locked = !!bracket?.locked;
-  const teamsById = new Map(teams.map((t) => [t.id, t]));
+  const teamsById = new Map(teamRows.map((t) => [t.id, t]));
   const pickBySlot = new Map(picks.map((p) => [p.game_slot, p]));
 
   // --- Standing -----------------------------------------------------------
@@ -192,9 +195,9 @@ export default async function DashboardPage() {
   // leaderboard entry type carries aren't fetched for other players.
   const entries = buildLeaderboard(
     ranked.map((b) => ({
-      userId: b.user_id,
-      displayName: b.profiles?.display_name || "Anonymous",
-      avatarUrl: b.profiles?.avatar_url ?? null,
+      userId: b.userId,
+      displayName: b.user?.displayName || "Anonymous",
+      avatarUrl: b.user?.avatarUrl ?? null,
       bracketId: b.id,
       bracketName: b.name,
       score: b.score ?? 0,
@@ -204,7 +207,7 @@ export default async function DashboardPage() {
   );
   const myEntry = bracket ? entries.find((e) => e.bracketId === bracket.id) : undefined;
   const { correct, scored } = summarizePicks(picks);
-  const eliminatedIds = new Set(teams.filter((t) => t.eliminated).map((t) => t.id));
+  const eliminatedIds = new Set(teamRows.filter((t) => t.eliminated).map((t) => t.id));
   const maxPossible = maxPossiblePoints(
     picks.map((p) => ({
       gameSlot: p.game_slot,
@@ -212,33 +215,33 @@ export default async function DashboardPage() {
       pointsEarned: p.points_earned,
       isCorrect: p.is_correct,
     })),
-    games.map((g) => ({
-      gameSlot: g.game_slot,
+    gameRows.map((g) => ({
+      gameSlot: g.gameSlot,
       round: g.round,
       status: g.status,
-      winnerId: g.winner_id,
+      winnerId: g.winnerId,
     })),
     eliminatedIds,
     multipliers
   );
 
-  const championshipGame = games.find((g) => g.round === "championship");
-  const champPickRow = championshipGame ? pickBySlot.get(championshipGame.game_slot) : undefined;
+  const championshipGame = gameRows.find((g) => g.round === "championship");
+  const champPickRow = championshipGame ? pickBySlot.get(championshipGame.gameSlot) : undefined;
   const champTeam = champPickRow ? teamsById.get(champPickRow.picked_team_id) : undefined;
   const championPick: ChampionPick | null = champTeam
     ? {
         name: champTeam.name,
         seed: champTeam.seed,
-        logoUrl: champTeam.logo_url,
+        logoUrl: champTeam.logoUrl,
         alive: !champTeam.eliminated,
       }
     : null;
 
   // --- Today's games --------------------------------------------------------
-  const todayRows: TodayGameRow[] = todaysGames(games).map((g) => {
-    const a = g.team_a_id ? teamsById.get(g.team_a_id) : undefined;
-    const b = g.team_b_id ? teamsById.get(g.team_b_id) : undefined;
-    const pick = pickBySlot.get(g.game_slot);
+  const todayRows: TodayGameRow[] = todaysGames(gameList).map((g) => {
+    const a = g.teamAId ? teamsById.get(g.teamAId) : undefined;
+    const b = g.teamBId ? teamsById.get(g.teamBId) : undefined;
+    const pick = pickBySlot.get(g.gameSlot);
     const pickedTeam = pick ? teamsById.get(pick.picked_team_id) : undefined;
     const regionLabel = g.region ? ` · ${REGION_DISPLAY_NAMES[g.region] ?? g.region}` : "";
     return {
@@ -246,8 +249,8 @@ export default async function DashboardPage() {
       roundLabel: `${ROUND_DISPLAY_NAMES[g.round]}${regionLabel}`,
       teamA: a ? { seed: a.seed, name: a.name } : null,
       teamB: b ? { seed: b.seed, name: b.name } : null,
-      scoreA: g.score_a,
-      scoreB: g.score_b,
+      scoreA: g.scoreA,
+      scoreB: g.scoreB,
       status: g.status,
       tipTime: g.scheduled_at ? formatEasternTime(g.scheduled_at) : "TBD",
       pick: pickedTeam
@@ -256,7 +259,7 @@ export default async function DashboardPage() {
     };
   });
 
-  const displayName = profile?.display_name || "Player";
+  const displayName = profile?.displayName || "Player";
   const lockDeadline = config?.bracket_lock_deadline ?? null;
   const wagerDeadline = config?.wager_creation_deadline ?? null;
   const urgent = !locked && isWithinHours(lockDeadline, 24);
@@ -366,7 +369,7 @@ export default async function DashboardPage() {
           )}
 
           <WagersWidget
-            wagers={completed ? wagers : wagers.filter((w) => w.status !== "resolved")}
+            wagers={completed ? wagerList : wagerList.filter((w) => w.status !== "resolved")}
             userId={user.id}
             wagerDeadline={wagerDeadline}
             pastWagerDeadline={pastWagerDeadline}

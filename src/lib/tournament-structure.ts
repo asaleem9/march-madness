@@ -85,7 +85,7 @@ export interface TournamentDates {
   championship: string;
 }
 
-/** A `games` row's structural columns, in snake_case ready for Supabase insert/upsert. */
+/** A `games` row's structural columns, in snake_case (database column names). */
 export interface GameSlotRow {
   game_slot: number;
   round: Round;

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v4";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, count, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { games, notificationQueue, tournamentConfig } from "@/db/schema";
 import { isAdminUser } from "@/lib/admin-auth";
 import { sanitizeError } from "@/lib/sanitizeError";
 import {
@@ -48,23 +50,41 @@ const updateSchema = z.object({
   final_four_pairing: pairingSchema.optional(),
 });
 
+type ConfigRow = typeof tournamentConfig.$inferSelect;
+
+/** The admin page reads the config row with its database column names. */
+function serializeConfig(row: ConfigRow) {
+  return {
+    id: row.id,
+    year: row.year,
+    bracket_lock_deadline: row.bracketLockDeadline.toISOString(),
+    wager_creation_deadline: row.wagerCreationDeadline.toISOString(),
+    scoring_multipliers: row.scoringMultipliers,
+    active_phase: row.activePhase,
+    final_four_pairing: row.finalFourPairing,
+    last_score_update_at: row.lastScoreUpdateAt?.toISOString() ?? null,
+  };
+}
+
 export async function GET() {
   if (!(await isAdminUser())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const adminClient = createAdminClient();
-  const [{ data }, { count: queueDepth }] = await Promise.all([
-    adminClient.from("tournament_config").select("*").eq("id", 1).maybeSingle(),
-    adminClient
-      .from("notification_queue")
-      .select("id", { count: "exact", head: true })
-      .eq("sent", false),
+  const [config, [{ queueDepth }]] = await Promise.all([
+    db.query.tournamentConfig.findFirst({ where: eq(tournamentConfig.id, 1) }),
+    db
+      .select({ queueDepth: count() })
+      .from(notificationQueue)
+      .where(eq(notificationQueue.sent, false)),
   ]);
 
-  // Queue depth rides along because RLS hides other users' queue rows from the
-  // browser client the admin page uses.
-  return NextResponse.json({ ...(data ?? {}), queue_depth: queueDepth ?? 0 });
+  // Queue depth rides along so the admin health panel can show the backlog
+  // without a second request.
+  return NextResponse.json({
+    ...(config ? serializeConfig(config) : {}),
+    queue_depth: queueDepth ?? 0,
+  });
 }
 
 export async function PUT(request: NextRequest) {
@@ -84,44 +104,57 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "No valid fields" }, { status: 400 });
   }
 
-  const adminClient = createAdminClient();
+  const set: Partial<typeof tournamentConfig.$inferInsert> = {};
+  if (updates.year !== undefined) set.year = updates.year;
+  if (updates.bracket_lock_deadline !== undefined) {
+    set.bracketLockDeadline = new Date(updates.bracket_lock_deadline);
+  }
+  if (updates.wager_creation_deadline !== undefined) {
+    set.wagerCreationDeadline = new Date(updates.wager_creation_deadline);
+  }
+  if (updates.active_phase !== undefined) set.activePhase = updates.active_phase;
+  if (updates.scoring_multipliers !== undefined) {
+    set.scoringMultipliers = updates.scoring_multipliers;
+  }
+  if (updates.final_four_pairing !== undefined) {
+    set.finalFourPairing = updates.final_four_pairing;
+  }
 
   // Changing the semifinal pairing rewires the four Elite Eight slots. Refuse
   // once any of those games is final — the bracket is already decided.
-  if (updates.final_four_pairing) {
-    const { data: decided } = await adminClient
-      .from("games")
-      .select("game_slot")
-      .in("round", ["elite_eight", "final_four"])
-      .eq("status", "final")
+  const pairing = updates.final_four_pairing as FinalFourPairing | undefined;
+  if (pairing) {
+    const decided = await db
+      .select({ gameSlot: games.gameSlot })
+      .from(games)
+      .where(and(inArray(games.round, ["elite_eight", "final_four"]), eq(games.status, "final")))
       .limit(1);
-    if (decided && decided.length > 0) {
+    if (decided.length > 0) {
       return NextResponse.json(
         { error: "Elite Eight games are already final; the pairing can't change" },
         { status: 409 }
       );
     }
-    const pairing = updates.final_four_pairing as FinalFourPairing;
-    for (const region of REGION_ORDER) {
-      const target = eliteEightTarget(region, pairing);
-      const { error } = await adminClient
-        .from("games")
-        .update({ next_game_slot: target.next_game_slot, slot_position: target.slot_position })
-        .eq("round", "elite_eight")
-        .eq("region", region);
-      if (error) {
-        return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
-      }
-    }
   }
 
-  const { error } = await adminClient
-    .from("tournament_config")
-    .update(updates)
-    .eq("id", 1);
-
-  if (error) {
-    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
+  try {
+    await db.transaction(async (tx) => {
+      if (pairing) {
+        for (const region of REGION_ORDER) {
+          const target = eliteEightTarget(region, pairing);
+          await tx
+            .update(games)
+            .set({ nextGameSlot: target.next_game_slot, slotPosition: target.slot_position })
+            .where(and(eq(games.round, "elite_eight"), eq(games.region, region)));
+        }
+      }
+      await tx.update(tournamentConfig).set(set).where(eq(tournamentConfig.id, 1));
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: sanitizeError(err instanceof Error ? err.message : null) },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ success: true });

@@ -6,10 +6,13 @@ import SectionDivider from "@/components/SectionDivider";
 import { LockCountdown } from "@/components/LockCountdown";
 import { WaitlistForm } from "@/components/WaitlistForm";
 import { formatEastern, formatEasternDate } from "@/components/dashboard/helpers";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getScoringMultipliers, getSeason, type ChampionInfo } from "@/lib/tournament";
 import { REQUIRED_PICKS, type YearDefaults } from "@/lib/tournament-structure";
 import type { TournamentPhase } from "@/types";
+
+// Reads the session cookie, so it can never be prerendered.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { displayYear, offSeason, upcoming } = await getSeason();
@@ -142,10 +145,8 @@ function OffSeasonCallout({
 }
 
 export default async function HomePage() {
-  const supabase = await createClient();
-  const [season, userRes] = await Promise.all([getSeason(), supabase.auth.getUser()]);
+  const [season, user] = await Promise.all([getSeason(), getCurrentUser()]);
   const { config, champion, phase, tournamentYear, displayYear, offSeason, upcoming } = season;
-  const user = userRes.data.user;
   const loggedIn = !!user;
   const multipliers = getScoringMultipliers(config);
   const ctas = ctasFor(phase, loggedIn, tournamentYear);

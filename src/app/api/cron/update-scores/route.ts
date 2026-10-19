@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  brackets,
+  games,
+  notificationQueue,
+  profiles,
+  teams,
+  tournamentConfig,
+  wagers,
+} from "@/db/schema";
 import {
   fetchESPNScoreboard,
   parseGameStatus,
@@ -8,7 +18,7 @@ import {
 } from "@/lib/espn";
 import { authorizeCronOrAdmin } from "@/lib/admin-auth";
 import { getScoringMultipliers } from "@/lib/tournament-config";
-import { processFinalGame, type FinalGameRow } from "@/lib/process-final-game";
+import { processFinalGame } from "@/lib/process-final-game";
 import { lockBracketsPastDeadline } from "@/lib/lock-brackets";
 import { awardAchievements } from "@/lib/achievements";
 
@@ -23,12 +33,13 @@ export async function POST(request: NextRequest) {
   return handleUpdateScores(request);
 }
 
+const gameWithTeams = { teamA: true, teamB: true } as const;
+
 async function handleUpdateScores(request: NextRequest) {
   if (!(await authorizeCronOrAdmin(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
   const now = new Date();
   const today = formatDateForESPN(now);
   const yesterday = formatDateForESPN(new Date(now.getTime() - 24 * 60 * 60 * 1000));
@@ -49,12 +60,12 @@ async function handleUpdateScores(request: NextRequest) {
     );
   }
 
-  const { data: config } = await supabase
-    .from("tournament_config")
-    .select("*")
-    .eq("id", 1)
-    .maybeSingle();
-  const multipliers = getScoringMultipliers(config);
+  const config = await db.query.tournamentConfig.findFirst({
+    where: eq(tournamentConfig.id, 1),
+  });
+  const multipliers = getScoringMultipliers({
+    scoring_multipliers: config?.scoringMultipliers ?? null,
+  });
 
   const allEvents = [
     ...(scoreboardTwoDaysAgo?.events || []),
@@ -73,11 +84,10 @@ async function handleUpdateScores(request: NextRequest) {
       const status = parseGameStatus(competition.status.type.state);
 
       // Find matching game in our DB by espn_game_id
-      let { data: game } = await supabase
-        .from("games")
-        .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
-        .eq("espn_game_id", espnGameId)
-        .single();
+      let game = await db.query.games.findFirst({
+        where: eq(games.espnGameId, espnGameId),
+        with: gameWithTeams,
+      });
 
       // Auto-discover: if no match by espn_game_id, try matching by team ESPN IDs
       if (!game) {
@@ -86,25 +96,27 @@ async function handleUpdateScores(request: NextRequest) {
           .filter((c) => !isTbdCompetitor(c))
           .map((c) => c.team.id);
         if (espnTeamIds.length === 2) {
-          const { data: matchedTeams } = await supabase
-            .from("teams")
-            .select("id")
-            .in("espn_id", espnTeamIds);
+          const matchedTeams = await db
+            .select({ id: teams.id })
+            .from(teams)
+            .where(inArray(teams.espnId, espnTeamIds));
 
-          if (matchedTeams && matchedTeams.length === 2) {
+          if (matchedTeams.length === 2) {
             const teamIds = matchedTeams.map((t) => t.id);
-            const { data: candidates } = await supabase
-              .from("games")
-              .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
-              .is("espn_game_id", null)
-              .in("team_a_id", teamIds)
-              .in("team_b_id", teamIds);
+            const candidates = await db.query.games.findMany({
+              where: and(
+                isNull(games.espnGameId),
+                inArray(games.teamAId, teamIds),
+                inArray(games.teamBId, teamIds)
+              ),
+              with: gameWithTeams,
+            });
 
-            if (candidates && candidates.length === 1) {
-              await supabase
-                .from("games")
-                .update({ espn_game_id: espnGameId })
-                .eq("id", candidates[0].id);
+            if (candidates.length === 1) {
+              await db
+                .update(games)
+                .set({ espnGameId })
+                .where(eq(games.id, candidates[0].id));
               game = candidates[0];
               gamesDiscovered++;
             }
@@ -119,9 +131,9 @@ async function handleUpdateScores(request: NextRequest) {
       let scoreA: number | null = null;
       let scoreB: number | null = null;
       for (const c of competitors) {
-        if (game.team_a?.espn_id === c.team.id && c.score) {
+        if (game.teamA?.espnId === c.team.id && c.score) {
           scoreA = parseInt(c.score);
-        } else if (game.team_b?.espn_id === c.team.id && c.score) {
+        } else if (game.teamB?.espnId === c.team.id && c.score) {
           scoreB = parseInt(c.score);
         }
       }
@@ -130,10 +142,10 @@ async function handleUpdateScores(request: NextRequest) {
       if (status === "final") {
         const winnerCompetitor = competitors.find((c) => c.winner);
         if (winnerCompetitor) {
-          if (game.team_a?.espn_id === winnerCompetitor.team.id) {
-            winnerId = game.team_a_id;
-          } else if (game.team_b?.espn_id === winnerCompetitor.team.id) {
-            winnerId = game.team_b_id;
+          if (game.teamA?.espnId === winnerCompetitor.team.id) {
+            winnerId = game.teamAId;
+          } else if (game.teamB?.espnId === winnerCompetitor.team.id) {
+            winnerId = game.teamBId;
           }
         }
       }
@@ -141,15 +153,15 @@ async function handleUpdateScores(request: NextRequest) {
       // Build the update defensively so a partial/regressed ESPN payload can't
       // clobber a good final: never downgrade a recorded final, never null out
       // an existing score or winner.
-      const updates: Record<string, unknown> = {
-        scheduled_at: competition.date,
+      const updates: Partial<typeof games.$inferInsert> = {
+        scheduledAt: new Date(competition.date),
       };
       if (!(game.status === "final" && status !== "final")) {
         updates.status = status;
       }
-      if (scoreA !== null) updates.score_a = scoreA;
-      if (scoreB !== null) updates.score_b = scoreB;
-      if (winnerId) updates.winner_id = winnerId;
+      if (scoreA !== null) updates.scoreA = scoreA;
+      if (scoreB !== null) updates.scoreB = scoreB;
+      if (winnerId) updates.winnerId = winnerId;
       if (status === "in_progress") {
         updates.clock = competition.status.displayClock ?? null;
         updates.period = competition.status.period ?? null;
@@ -158,21 +170,21 @@ async function handleUpdateScores(request: NextRequest) {
         updates.period = null;
       }
 
-      const { error } = await supabase
-        .from("games")
-        .update(updates)
-        .eq("id", game.id);
-
-      if (!error) gamesUpdated++;
+      try {
+        await db.update(games).set(updates).where(eq(games.id, game.id));
+        gamesUpdated++;
+      } catch (err) {
+        console.error(`Failed to update game ${game.id} (slot ${game.gameSlot}):`, err);
+      }
 
       // Once a winner is known, run the (idempotent) post-final pipeline every
       // cycle so missed advancements self-heal. Notify only when the winner
       // first becomes known — which also covers games ESPN marks final before
       // it sets the winner flag.
-      const winnerNewlyKnown = !!winnerId && winnerId !== game.winner_id;
+      const winnerNewlyKnown = !!winnerId && winnerId !== game.winnerId;
       if (status === "final" && winnerId) {
-        const result = await processFinalGame(supabase, {
-          game: game as unknown as FinalGameRow,
+        const result = await processFinalGame(db, {
+          game,
           winnerId,
           scoreA,
           scoreB,
@@ -187,16 +199,16 @@ async function handleUpdateScores(request: NextRequest) {
   }
 
   // Past the lock deadline, finalize complete drafts so they count.
-  const lock = await lockBracketsPastDeadline(supabase, now);
+  const lock = await lockBracketsPastDeadline(db, now);
 
   // Once the tournament is over, settle any accepted wagers and hand out badges.
-  const wagersResolved = await resolveCompletedWagers(supabase);
-  const achievementsAwarded = await awardAchievements(supabase);
+  const wagersResolved = await resolveCompletedWagers();
+  const achievementsAwarded = await awardAchievements(db);
 
-  await supabase
-    .from("tournament_config")
-    .update({ last_score_update_at: now.toISOString() })
-    .eq("id", 1);
+  await db
+    .update(tournamentConfig)
+    .set({ lastScoreUpdateAt: now })
+    .where(eq(tournamentConfig.id, 1));
 
   return NextResponse.json({
     message: "Scores updated",
@@ -215,105 +227,97 @@ async function handleUpdateScores(request: NextRequest) {
 // Resolve accepted wagers by comparing final bracket scores. Runs only after
 // the championship is final; idempotent because it only touches wagers still
 // in the "accepted" state.
-async function resolveCompletedWagers(
-  supabase: ReturnType<typeof createAdminClient>
-): Promise<number> {
-  const { data: champ } = await supabase
-    .from("games")
-    .select("status, winner_id")
-    .eq("round", "championship")
-    .maybeSingle();
+async function resolveCompletedWagers(): Promise<number> {
+  const champ = await db.query.games.findFirst({
+    where: eq(games.round, "championship"),
+    columns: { status: true, winnerId: true },
+  });
 
-  if (!champ || champ.status !== "final" || !champ.winner_id) return 0;
+  if (!champ || champ.status !== "final" || !champ.winnerId) return 0;
 
-  const { data: wagers } = await supabase
-    .from("wagers")
-    .select("*")
-    .eq("status", "accepted");
+  const accepted = await db.query.wagers.findMany({
+    where: eq(wagers.status, "accepted"),
+  });
 
-  if (!wagers || wagers.length === 0) return 0;
+  if (accepted.length === 0) return 0;
 
   let resolved = 0;
-  const nowIso = new Date().toISOString();
+  const resolvedAt = new Date();
 
   // Display names for the notification copy ("You beat Ali: loser buys dinner").
-  const userIds = [...new Set(wagers.flatMap((w) => [w.challenger_id, w.opponent_id]))];
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, display_name")
-    .in("id", userIds);
-  const nameOf = new Map((profiles ?? []).map((p) => [p.id, p.display_name as string | null]));
+  const userIds = [...new Set(accepted.flatMap((w) => [w.challengerId, w.opponentId]))];
+  const names = await db
+    .select({ id: profiles.id, displayName: profiles.displayName })
+    .from(profiles)
+    .where(inArray(profiles.id, userIds));
+  const nameOf = new Map(names.map((p) => [p.id, p.displayName]));
 
-  for (const wager of wagers) {
-    const { data: challengerBracket } = await supabase
-      .from("brackets")
-      .select("score")
-      .eq("id", wager.challenger_bracket_id)
-      .single();
+  const bracketScore = async (bracketId: string): Promise<number> => {
+    const row = await db.query.brackets.findFirst({
+      where: eq(brackets.id, bracketId),
+      columns: { score: true },
+    });
+    return row?.score ?? 0;
+  };
+
+  for (const wager of accepted) {
+    const challengerScore = await bracketScore(wager.challengerBracketId);
 
     // Use the explicitly-wagered opponent bracket, else fall back to their
     // primary bracket.
     let opponentScore = 0;
-    if (wager.opponent_bracket_id) {
-      const { data } = await supabase
-        .from("brackets")
-        .select("score")
-        .eq("id", wager.opponent_bracket_id)
-        .single();
-      opponentScore = data?.score ?? 0;
+    if (wager.opponentBracketId) {
+      opponentScore = await bracketScore(wager.opponentBracketId);
     } else {
-      const { data } = await supabase
-        .from("brackets")
-        .select("score")
-        .eq("user_id", wager.opponent_id)
-        .eq("is_primary", true)
-        .limit(1)
-        .maybeSingle();
-      opponentScore = data?.score ?? 0;
+      const row = await db.query.brackets.findFirst({
+        where: and(eq(brackets.userId, wager.opponentId), eq(brackets.isPrimary, true)),
+        columns: { score: true },
+      });
+      opponentScore = row?.score ?? 0;
     }
 
-    const challengerScore = challengerBracket?.score ?? 0;
-
     let winnerId: string | null = null;
-    if (challengerScore > opponentScore) winnerId = wager.challenger_id;
-    else if (opponentScore > challengerScore) winnerId = wager.opponent_id;
+    if (challengerScore > opponentScore) winnerId = wager.challengerId;
+    else if (opponentScore > challengerScore) winnerId = wager.opponentId;
     // Equal scores → resolved with no winner (a tie).
 
-    await supabase
-      .from("wagers")
-      .update({ status: "resolved", winner_id: winnerId, resolved_at: nowIso })
-      .eq("id", wager.id);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(wagers)
+        .set({ status: "resolved", winnerId, resolvedAt })
+        .where(eq(wagers.id, wager.id));
 
-    await supabase.from("notification_queue").insert([
-      {
-        user_id: wager.challenger_id,
-        type: "wager_result" as const,
-        payload: {
-          wager_id: wager.id,
-          stakes: wager.stakes,
-          opponent_id: wager.opponent_id,
-          opponent_name: nameOf.get(wager.opponent_id) ?? null,
-          your_score: challengerScore,
-          their_score: opponentScore,
-          won: winnerId === wager.challenger_id,
-          tie: winnerId === null,
+      await tx.insert(notificationQueue).values([
+        {
+          userId: wager.challengerId,
+          type: "wager_result",
+          payload: {
+            wager_id: wager.id,
+            stakes: wager.stakes,
+            opponent_id: wager.opponentId,
+            opponent_name: nameOf.get(wager.opponentId) ?? null,
+            your_score: challengerScore,
+            their_score: opponentScore,
+            won: winnerId === wager.challengerId,
+            tie: winnerId === null,
+          },
         },
-      },
-      {
-        user_id: wager.opponent_id,
-        type: "wager_result" as const,
-        payload: {
-          wager_id: wager.id,
-          stakes: wager.stakes,
-          opponent_id: wager.challenger_id,
-          opponent_name: nameOf.get(wager.challenger_id) ?? null,
-          your_score: opponentScore,
-          their_score: challengerScore,
-          won: winnerId === wager.opponent_id,
-          tie: winnerId === null,
+        {
+          userId: wager.opponentId,
+          type: "wager_result",
+          payload: {
+            wager_id: wager.id,
+            stakes: wager.stakes,
+            opponent_id: wager.challengerId,
+            opponent_name: nameOf.get(wager.challengerId) ?? null,
+            your_score: opponentScore,
+            their_score: challengerScore,
+            won: winnerId === wager.opponentId,
+            tie: winnerId === null,
+          },
         },
-      },
-    ]);
+      ]);
+    });
 
     resolved++;
   }

@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { pushSubscriptions } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth/session";
 import { sanitizeError } from "@/lib/sanitizeError";
 
 interface SubscriptionBody {
   endpoint?: unknown;
   keys?: { p256dh?: unknown; auth?: unknown } | null;
+}
+
+/** The pg error text is on `cause` when Drizzle wraps a failed query. */
+function dbErrorMessage(err: unknown): string | undefined {
+  const e = err as { message?: string; cause?: { message?: string } };
+  return e?.cause?.message ?? e?.message;
 }
 
 function parseSubscription(body: SubscriptionBody) {
@@ -18,13 +27,11 @@ function parseSubscription(body: SubscriptionBody) {
 /**
  * Register this browser's push subscription. A user can have several (phone +
  * laptop), so the conflict target is the endpoint — re-subscribing the same
- * device just refreshes its keys.
+ * device just refreshes its keys (and, after a sign-in as someone else on the
+ * same device, moves the endpoint to the user who now holds it).
  */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -35,17 +42,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid subscription" }, { status: 400 });
   }
 
-  const { error } = await supabase.from("push_subscriptions").upsert(
-    {
-      user_id: user.id,
-      endpoint: subscription.endpoint,
-      keys: subscription.keys,
-    },
-    { onConflict: "endpoint" }
-  );
-
-  if (error) {
-    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
+  try {
+    await db
+      .insert(pushSubscriptions)
+      .values({
+        userId: user.id,
+        endpoint: subscription.endpoint,
+        keys: subscription.keys,
+      })
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: { userId: user.id, keys: subscription.keys },
+      });
+  } catch (err) {
+    return NextResponse.json({ error: sanitizeError(dbErrorMessage(err)) }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
@@ -53,10 +63,7 @@ export async function POST(request: NextRequest) {
 
 /** Remove this browser's subscription (the push toggle turned off). */
 export async function DELETE(request: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -68,15 +75,13 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
   }
 
-  // RLS limits this to the user's own rows; the user_id filter is belt and braces.
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .delete()
-    .eq("endpoint", endpoint)
-    .eq("user_id", user.id);
-
-  if (error) {
-    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
+  // Only the user's own row for that endpoint.
+  try {
+    await db
+      .delete(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.userId, user.id)));
+  } catch (err) {
+    return NextResponse.json({ error: sanitizeError(dbErrorMessage(err)) }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

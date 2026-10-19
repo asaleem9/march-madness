@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth/client";
 import { useToast } from "@/hooks/useToast";
+import { PasswordInput } from "@/components/PasswordInput";
 import type { AchievementType, NotificationPreferences } from "@/types";
 import { Badges } from "./Badges";
 import { PushToggle } from "./PushToggle";
 import { normalizePhoneE164 } from "./phone";
 
-/** The value the profiles trigger assigns before the user ever visits this page. */
+/** The value a profile row gets before the user ever visits this page. */
 const DEFAULT_TIMEZONE = "America/New_York";
 
 export interface ProfileInitial {
@@ -20,14 +22,26 @@ export interface ProfileInitial {
 }
 
 interface Props {
-  userId: string;
+  /** Kept for the server page's convenience; the API route works from the session. */
+  userId?: string;
   email: string;
-  profileExists: boolean;
+  /** Kept for compatibility; the API route creates the row if it's missing. */
+  profileExists?: boolean;
   initial: ProfileInitial;
   earned: AchievementType[];
   channels: { sms: boolean; email: boolean };
   vapidPublicKey: string;
 }
+
+/** Body for PATCH /api/profile (a partial of the editable profile fields). */
+interface ProfilePatch {
+  displayName?: string;
+  phone?: string | null;
+  timezone?: string;
+  notificationPreferences?: NotificationPreferences;
+}
+
+type SaveResult = { error: { status: number; message: string } | null };
 
 const inputClass =
   "w-full border-2 border-navy p-3 font-body text-base bg-cream focus:outline-none focus:ring-2 focus:ring-gold disabled:opacity-50";
@@ -36,15 +50,13 @@ const labelClass = "font-display text-[0.6rem] text-navy block mb-2";
 type Status = { kind: "success" | "error"; text: string } | null;
 
 export function ProfileClient({
-  userId,
   email,
-  profileExists,
   initial,
   earned,
   channels,
   vapidPublicKey,
 }: Props) {
-  const [supabase] = useState(() => createClient());
+  const router = useRouter();
   const toast = useToast();
 
   const [displayName, setDisplayName] = useState(initial.displayName);
@@ -55,7 +67,12 @@ export function ProfileClient({
   const [status, setStatus] = useState<Status>(null);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const existsRef = useRef(profileExists);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordStatus, setPasswordStatus] = useState<Status>(null);
 
   const normalizedPhone = normalizePhoneE164(phone);
   const phoneValid = normalizedPhone !== null;
@@ -66,18 +83,23 @@ export function ProfileClient({
     toast(text, kind);
   };
 
-  /** Write a partial profile row (insert if the trigger never created one). */
-  const persist = async (patch: Record<string, unknown>) => {
-    const row = { ...patch, updated_at: new Date().toISOString() };
-    if (existsRef.current) {
-      return supabase.from("profiles").update(row).eq("id", userId);
+  /** Write a partial profile through the API (it only ever touches the caller's row). */
+  const persist = async (patch: ProfilePatch): Promise<SaveResult> => {
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) return { error: null };
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      return { error: { status: res.status, message: data?.error || `HTTP ${res.status}` } };
+    } catch {
+      return { error: { status: 0, message: "Network error" } };
     }
-    const res = await supabase.from("profiles").insert({ id: userId, display_name: displayName, ...row });
-    if (!res.error) existsRef.current = true;
-    return res;
   };
 
-  // First visit: the trigger stamped America/New_York. If the browser lives
+  // First visit: the row was stamped America/New_York. If the browser lives
   // somewhere else, adopt it silently so quiet hours line up with the user.
   const autoTzDone = useRef(false);
   useEffect(() => {
@@ -109,10 +131,10 @@ export function ProfileClient({
     setStatus(null);
 
     const { error } = await persist({
-      display_name: name,
+      displayName: name,
       phone: normalizedPhone,
       timezone,
-      notification_preferences: {
+      notificationPreferences: {
         ...prefs,
         sms: prefs.sms && phoneValid && channels.sms,
         email: prefs.email && channels.email,
@@ -123,7 +145,7 @@ export function ProfileClient({
     if (error) {
       report(
         "error",
-        error.code === "23505" ? "That name is taken" : `Failed to save: ${error.message}`
+        error.status === 409 ? "That name is taken" : `Failed to save: ${error.message}`
       );
       return;
     }
@@ -134,14 +156,50 @@ export function ProfileClient({
   const handlePushChange = async (enabled: boolean) => {
     const next = { ...prefs, push: enabled };
     setPrefs(next);
-    const { error } = await persist({ notification_preferences: next });
+    const { error } = await persist({ notificationPreferences: next });
     if (error) throw new Error(`Could not save the preference: ${error.message}`);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordStatus(null);
+    if (newPassword.length < 8) {
+      setPasswordStatus({ kind: "error", text: "New password must be at least 8 characters" });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus({ kind: "error", text: "Passwords do not match" });
+      return;
+    }
+    setChangingPassword(true);
+    const { error } = await authClient.changePassword({
+      currentPassword,
+      newPassword,
+      revokeOtherSessions: true,
+    });
+    setChangingPassword(false);
+    if (error) {
+      const text = error.message || "Could not change your password";
+      setPasswordStatus({ kind: "error", text });
+      toast(text, "error");
+      return;
+    }
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordStatus({ kind: "success", text: "Password changed" });
+    toast("Password changed", "success");
   };
 
   const handleSignOut = async () => {
     setSigningOut(true);
-    await supabase.auth.signOut();
-    window.location.href = "/";
+    try {
+      await authClient.signOut();
+    } finally {
+      setSigningOut(false);
+    }
+    router.push("/");
+    router.refresh();
   };
 
   const optedOut = !prefs.push && !(prefs.sms && channels.sms) && !(prefs.email && channels.email);
@@ -329,6 +387,75 @@ export function ProfileClient({
               className={`font-body text-xs ${status.kind === "error" ? "text-burnt-orange" : "text-forest"}`}
             >
               {status.text}
+            </p>
+          )}
+        </div>
+      </form>
+
+      <form onSubmit={handleChangePassword} className="retro-card p-6 space-y-4 mt-8">
+        <h2 className="font-display text-navy text-[0.6rem]">CHANGE PASSWORD</h2>
+        <p className="font-body text-xs text-navy/60">
+          Signed in as <span className="text-navy">{email}</span>. The email on your account can&apos;t
+          be changed here. If you only ever sign in with Google, set a password from the{" "}
+          <Link href="/forgot-password" className="font-bold underline">
+            reset page
+          </Link>{" "}
+          instead.
+        </p>
+        <div>
+          <label htmlFor="profile-current-password" className={labelClass}>
+            CURRENT PASSWORD
+          </label>
+          <PasswordInput
+            id="profile-current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+          />
+        </div>
+        <div>
+          <label htmlFor="profile-new-password" className={labelClass}>
+            NEW PASSWORD
+          </label>
+          <PasswordInput
+            id="profile-new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            required
+            minLength={8}
+            autoComplete="new-password"
+            placeholder="Min. 8 characters"
+          />
+        </div>
+        <div>
+          <label htmlFor="profile-confirm-password" className={labelClass}>
+            CONFIRM NEW PASSWORD
+          </label>
+          <PasswordInput
+            id="profile-confirm-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            minLength={8}
+            autoComplete="new-password"
+            placeholder="Retype your new password"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="submit"
+            disabled={changingPassword}
+            className="retro-btn retro-btn-secondary disabled:opacity-50"
+          >
+            {changingPassword ? "Saving..." : "Change Password"}
+          </button>
+          {passwordStatus && (
+            <p
+              role={passwordStatus.kind === "error" ? "alert" : "status"}
+              className={`font-body text-xs ${passwordStatus.kind === "error" ? "text-burnt-orange" : "text-forest"}`}
+            >
+              {passwordStatus.text}
             </p>
           )}
         </div>

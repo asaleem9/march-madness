@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { authClient } from "@/lib/auth/client";
+import type { AppUser } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
 
 const memberLinks = [
@@ -25,32 +25,31 @@ const publicLinks = [
 
 interface HeaderProps {
   /** Seeded from the server so the logged-in nav renders on first paint (no flash). */
-  initialUser?: User | null;
+  initialUser?: AppUser | null;
   isAdmin?: boolean;
 }
 
 export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(initialUser);
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmSignOut, setConfirmSignOut] = useState(false);
-  // Memoize so the auth listener isn't re-subscribed on every render.
-  const [supabase] = useState<SupabaseClient>(() => createClient());
+  const [signingOut, setSigningOut] = useState(false);
+
+  // The server-seeded user carries the first paint; once the browser session
+  // has loaded it takes over (sign-in/out elsewhere updates it).
+  const { data: session, isPending } = authClient.useSession();
+  const user: Pick<AppUser, "id" | "email"> | null = isPending
+    ? initialUser
+    : session?.user
+      ? { id: session.user.id, email: session.user.email }
+      : null;
 
   // "Bracket" (href /bracket/new) should stay active while viewing /bracket/[id].
   const isActive = (href: string) =>
     href === "/bracket/new"
       ? pathname?.startsWith("/bracket")
       : pathname === href || pathname?.startsWith(href + "/");
-
-  useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase]);
 
   // Close the drawer whenever the route changes (tap on a link, back button).
   // Derived-state pattern: compare during render instead of in an effect.
@@ -62,8 +61,17 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/";
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await authClient.signOut();
+    } finally {
+      setSigningOut(false);
+      setConfirmSignOut(false);
+      setMenuOpen(false);
+    }
+    router.push("/");
+    router.refresh();
   };
 
   const links = user ? memberLinks : publicLinks;
@@ -129,7 +137,8 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
                     <span className="text-cream-dark">Sign out?</span>
                     <button
                       onClick={handleSignOut}
-                      className="text-burnt-orange hover:underline px-1 py-2"
+                      disabled={signingOut}
+                      className="text-burnt-orange hover:underline px-1 py-2 disabled:opacity-50"
                     >
                       Yes
                     </button>
@@ -197,23 +206,38 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
                 {link.label}
               </Link>
             ))}
-            {user && (
-              <>
-                <Link href="/profile" className={cn(linkClass("/profile"), "py-3")}>
-                  Profile
-                </Link>
-                {isAdmin && (
-                  <Link href="/admin" className={cn(linkClass("/admin"), "py-3")}>
-                    Admin
-                  </Link>
-                )}
+            <Link href="/profile" className={cn(linkClass("/profile"), "py-3")}>
+              Profile
+            </Link>
+            {isAdmin && (
+              <Link href="/admin" className={cn(linkClass("/admin"), "py-3")}>
+                Admin
+              </Link>
+            )}
+            {confirmSignOut ? (
+              <div className="flex items-center gap-3 px-3 py-3 text-xs" role="group" aria-label="Confirm sign out">
+                <span className="text-cream-dark">Sign out?</span>
                 <button
                   onClick={handleSignOut}
-                  className="font-body text-xs px-3 py-3 text-left text-burnt-orange hover:text-cream rounded"
+                  disabled={signingOut}
+                  className="font-body text-burnt-orange hover:underline disabled:opacity-50"
                 >
-                  Sign Out
+                  Yes
                 </button>
-              </>
+                <button
+                  onClick={() => setConfirmSignOut(false)}
+                  className="font-body text-cream-dark hover:underline"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmSignOut(true)}
+                className="font-body text-xs px-3 py-3 text-left text-burnt-orange hover:text-cream rounded"
+              >
+                Sign Out
+              </button>
             )}
           </nav>
         )}

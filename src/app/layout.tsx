@@ -6,9 +6,12 @@ import { Providers } from "@/components/Providers";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Toasts } from "@/components/Toasts";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser } from "@/lib/auth/session";
 import { isAdminEmail } from "@/lib/admin-auth";
 import { getSeason } from "@/lib/tournament";
+
+// Reads the session cookie, so it can never be prerendered.
+export const dynamic = "force-dynamic";
 
 const pressStart = Press_Start_2P({
   weight: "400",
@@ -55,10 +58,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   return (
     <html lang="en" className={`${pressStart.variable} ${spaceMono.variable}`}>

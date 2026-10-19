@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { authClient } from "@/lib/auth/client";
 import { AuthShell, inputClass, labelClass } from "../_components/AuthShell";
 
 export default function ForgotPasswordPage() {
@@ -15,13 +15,13 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const supabase = createClient();
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await authClient.requestPasswordReset({
+      email,
       redirectTo: `${window.location.origin}/reset`,
     });
     setLoading(false);
     if (error) {
-      setError(error.message);
+      setError(error.message || "Could not send the reset email");
       return;
     }
     setSent(true);
@@ -33,7 +33,7 @@ export default function ForgotPasswordPage() {
         <h1 className="font-display text-navy text-sm mb-4">CHECK YOUR EMAIL</h1>
         <p className="font-body text-sm text-navy/80" role="status">
           If an account exists for <strong>{email}</strong>, we sent a link to
-          reset your password. Open it in this browser.
+          reset your password.
         </p>
         <p className="font-body text-xs text-navy/60 mt-3">
           Nothing there? Check your spam folder.

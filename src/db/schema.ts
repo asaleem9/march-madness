@@ -103,7 +103,7 @@ export const pushSubscriptions = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: uuid("user_id")
-      .references(() => profiles.id)
+      .references(() => profiles.id, { onDelete: "cascade" })
       .notNull(),
     endpoint: text("endpoint").notNull(),
     keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
@@ -165,7 +165,7 @@ export const brackets = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
-      .references(() => profiles.id)
+      .references(() => profiles.id, { onDelete: "cascade" })
       .notNull(),
     name: text("name").notNull(),
     isPrimary: boolean("is_primary").default(true),
@@ -185,7 +185,7 @@ export const bracketPicks = pgTable(
   {
     id: serial("id").primaryKey(),
     bracketId: uuid("bracket_id")
-      .references(() => brackets.id)
+      .references(() => brackets.id, { onDelete: "cascade" })
       .notNull(),
     gameSlot: integer("game_slot").notNull(),
     round: roundEnum("round").notNull(),
@@ -236,7 +236,7 @@ export const userAchievements = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: uuid("user_id")
-      .references(() => profiles.id)
+      .references(() => profiles.id, { onDelete: "cascade" })
       .notNull(),
     achievementType: achievementTypeEnum("achievement_type").notNull(),
     earnedAt: timestamp("earned_at", { withTimezone: true }).defaultNow(),
@@ -251,7 +251,7 @@ export const notificationQueue = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: uuid("user_id")
-      .references(() => profiles.id)
+      .references(() => profiles.id, { onDelete: "cascade" })
       .notNull(),
     type: notificationTypeEnum("type").notNull(),
     payload: jsonb("payload").notNull(),
@@ -274,7 +274,7 @@ export const notificationsLog = pgTable(
   {
     id: serial("id").primaryKey(),
     userId: uuid("user_id")
-      .references(() => profiles.id)
+      .references(() => profiles.id, { onDelete: "cascade" })
       .notNull(),
     message: text("message").notNull(),
     sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow(),
@@ -323,3 +323,54 @@ export const emailWaitlist = pgTable("email_waitlist", {
   email: text("email").notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
+
+// Relations (enable `db.query.<table>.findMany({ with: ... })`)
+import { relations } from "drizzle-orm";
+
+export const profilesRelations = relations(profiles, ({ one, many }) => ({
+  bracket: one(brackets, { fields: [profiles.id], references: [brackets.userId] }),
+  pushSubscriptions: many(pushSubscriptions),
+  achievements: many(userAchievements),
+}));
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
+  user: one(profiles, { fields: [pushSubscriptions.userId], references: [profiles.id] }),
+}));
+
+export const gamesRelations = relations(games, ({ one }) => ({
+  teamA: one(teams, { fields: [games.teamAId], references: [teams.id], relationName: "gameTeamA" }),
+  teamB: one(teams, { fields: [games.teamBId], references: [teams.id], relationName: "gameTeamB" }),
+  winner: one(teams, { fields: [games.winnerId], references: [teams.id], relationName: "gameWinner" }),
+}));
+
+export const teamsRelations = relations(teams, ({ many }) => ({
+  gamesAsTeamA: many(games, { relationName: "gameTeamA" }),
+  gamesAsTeamB: many(games, { relationName: "gameTeamB" }),
+  gamesWon: many(games, { relationName: "gameWinner" }),
+}));
+
+export const bracketsRelations = relations(brackets, ({ one, many }) => ({
+  user: one(profiles, { fields: [brackets.userId], references: [profiles.id] }),
+  picks: many(bracketPicks),
+}));
+
+export const bracketPicksRelations = relations(bracketPicks, ({ one }) => ({
+  bracket: one(brackets, { fields: [bracketPicks.bracketId], references: [brackets.id] }),
+  pickedTeam: one(teams, { fields: [bracketPicks.pickedTeamId], references: [teams.id] }),
+}));
+
+export const wagersRelations = relations(wagers, ({ one }) => ({
+  challenger: one(profiles, { fields: [wagers.challengerId], references: [profiles.id], relationName: "wagerChallenger" }),
+  opponent: one(profiles, { fields: [wagers.opponentId], references: [profiles.id], relationName: "wagerOpponent" }),
+  winner: one(profiles, { fields: [wagers.winnerId], references: [profiles.id], relationName: "wagerWinner" }),
+  challengerBracket: one(brackets, { fields: [wagers.challengerBracketId], references: [brackets.id], relationName: "wagerChallengerBracket" }),
+  opponentBracket: one(brackets, { fields: [wagers.opponentBracketId], references: [brackets.id], relationName: "wagerOpponentBracket" }),
+}));
+
+export const userAchievementsRelations = relations(userAchievements, ({ one }) => ({
+  user: one(profiles, { fields: [userAchievements.userId], references: [profiles.id] }),
+}));
+
+export const notificationQueueRelations = relations(notificationQueue, ({ one }) => ({
+  user: one(profiles, { fields: [notificationQueue.userId], references: [profiles.id] }),
+}));

@@ -1,7 +1,14 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
-import { createRecordingClient, type RecordedCall } from "@/test/helpers";
+import { asc, ne, sql } from "drizzle-orm";
+import {
+  notificationQueue,
+  notificationsLog,
+  profiles,
+  pushSubscriptions,
+} from "@/db/schema";
+import { seedProfile, seedUserId } from "@/test/db";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -23,23 +30,24 @@ vi.mock("@/lib/notifications", async () => {
   };
 });
 
-let client: ReturnType<typeof createRecordingClient>;
-const mockGetUserById = vi.fn();
+vi.mock("@/db", async () => {
+  const { createTestDb } = await import("@/test/db");
+  return { db: await createTestDb() };
+});
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(() => ({
-    ...client,
-    auth: { admin: { getUserById: mockGetUserById } },
-  })),
-}));
+// The session is only consulted by the admin-session auth fallback.
+vi.mock("@/lib/auth/session", () => ({ getCurrentUser: vi.fn() }));
 
-// Server client is only used by the admin-session auth fallback.
-const mockServerGetUser = vi.fn();
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ auth: { getUser: mockServerGetUser } })),
-}));
+import { db } from "@/db";
+import { getCurrentUser } from "@/lib/auth/session";
+import { GET, POST } from "../route";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+const mockGetCurrentUser = vi.mocked(getCurrentUser);
+
+const USER_1 = seedUserId(1);
+const USER_2 = seedUserId(2);
 
 const mockRequest = (headers?: Record<string, string>) =>
   ({
@@ -50,101 +58,91 @@ const mockRequest = (headers?: Record<string, string>) =>
 
 const cronRequest = () => mockRequest({ authorization: "Bearer test-cron-secret" });
 
-function queueItem(overrides: Record<string, unknown> = {}) {
+type QueueInsert = typeof notificationQueue.$inferInsert;
+
+function queueItem(overrides: Partial<QueueInsert> = {}): QueueInsert {
   return {
-    id: "q-1",
-    user_id: "user-1",
+    userId: USER_1,
     type: "game_result",
     payload: { game_id: 1, picked: "Duke", correct: true, points: 20, winner: "Duke" },
-    batch_key: "20270318-afternoon",
+    batchKey: "20270318-afternoon",
     sent: false,
     attempts: 0,
-    created_at: "2027-03-18T14:00:00Z",
+    createdAt: new Date("2027-03-18T14:00:00Z"),
     ...overrides,
   };
 }
 
-function profile(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "user-1",
-    display_name: "TestUser",
+const defaultPrefs = { push: true, sms: false, email: false, digest_only: false };
+
+async function seedUser(
+  id: string,
+  overrides: Partial<typeof profiles.$inferInsert> = {},
+  opts: { subs?: Array<{ endpoint: string }>; logCount?: number; email?: string } = {}
+) {
+  await seedProfile(db, {
+    id,
+    displayName: `user-${id.slice(-4)}`,
     timezone: "America/New_York",
     phone: "+15551234567",
-    notification_preferences: { push: true, sms: false, email: false, digest_only: false },
+    notificationPreferences: defaultPrefs,
     ...overrides,
-  };
-}
-
-function sub(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 1,
-    user_id: "user-1",
-    endpoint: "https://push.example.com/a",
-    keys: { p256dh: "pk", auth: "ak" },
-    ...overrides,
-  };
-}
-
-const eqArg = (chain: RecordedCall[], column: string) =>
-  chain.find((c) => c.method === "eq" && c.args[0] === column)?.args[1];
-
-/**
- * Build a recording client for a scenario. `logCount` is the number of
- * notifications_log rows "already sent today" per user.
- */
-function setup(opts: {
-  queue: ReturnType<typeof queueItem>[];
-  profiles?: Record<string, ReturnType<typeof profile>>;
-  subs?: ReturnType<typeof sub>[];
-  logCount?: Record<string, number>;
-}) {
-  const profiles = opts.profiles ?? { "user-1": profile() };
-  const subs = opts.subs ?? [sub()];
-  client = createRecordingClient((table, chain) => {
-    const method = chain[0]?.method;
-    if (table === "notification_queue" && method === "select") return opts.queue;
-    if (table === "profiles") return profiles[eqArg(chain, "id") as string] ?? null;
-    if (table === "push_subscriptions" && method === "select") {
-      const uid = eqArg(chain, "user_id");
-      return subs.filter((s) => s.user_id === uid);
-    }
-    if (table === "notifications_log" && method === "select") {
-      const uid = eqArg(chain, "user_id") as string;
-      const n = opts.logCount?.[uid] ?? 0;
-      // createRecordingClient derives `count` from the array length.
-      return Array.from({ length: n }, (_, i) => ({ id: i }));
-    }
-    return null;
   });
+  const subs = opts.subs ?? [{ endpoint: `https://push.example.com/${id.slice(-1)}` }];
+  if (subs.length > 0) {
+    await db.insert(pushSubscriptions).values(
+      subs.map((s) => ({ userId: id, endpoint: s.endpoint, keys: { p256dh: "pk", auth: "ak" } }))
+    );
+  }
+  if (opts.logCount) {
+    // "Already sent today": rows stamped now, inside the user's local day.
+    await db.insert(notificationsLog).values(
+      Array.from({ length: opts.logCount }, () => ({ userId: id, message: "earlier", channel: "push" as const }))
+    );
+  }
+  if (opts.email) {
+    await db.execute(sql`insert into neon_auth."user" (id, email) values (${id}::uuid, ${opts.email})`);
+  }
 }
 
-const sentIds = () =>
-  client
-    .updates("notification_queue")
-    .filter((u) => (u.args[0] as { sent?: boolean }).sent === true)
-    .flatMap((u) => client.filtersAfter(u).flatMap((f) => (f.method === "in" ? (f.args[1] as string[]) : [f.args[1] as string])));
+/** Insert queue rows and return their ids in insertion order. */
+async function enqueue(items: QueueInsert[]): Promise<number[]> {
+  const rows = await db.insert(notificationQueue).values(items).returning({ id: notificationQueue.id });
+  return rows.map((r) => r.id);
+}
+
+const queueRows = () =>
+  db
+    .select({ id: notificationQueue.id, sent: notificationQueue.sent, attempts: notificationQueue.attempts })
+    .from(notificationQueue)
+    .orderBy(asc(notificationQueue.id));
+
+const sentIds = async () => (await queueRows()).filter((r) => r.sent).map((r) => r.id);
+
+/** Log rows written by the batch (the seeded "earlier" rows are excluded). */
+const logRows = () => db.select().from(notificationsLog).where(ne(notificationsLog.message, "earlier"));
+
+const subEndpoints = () =>
+  db.select({ endpoint: pushSubscriptions.endpoint }).from(pushSubscriptions).orderBy(asc(pushSubscriptions.id));
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("send-batch", () => {
-  let POST: (request: NextRequest) => Promise<Response>;
-  let GET: (request: NextRequest) => Promise<Response>;
-
   beforeEach(async () => {
-    vi.resetModules();
+    await db.execute(sql`create schema if not exists neon_auth`);
+    await db.execute(
+      sql`create table if not exists neon_auth."user" (id uuid primary key, email text, name text)`
+    );
+    await db.execute(
+      sql`truncate table notification_queue, notifications_log, push_subscriptions, profiles, neon_auth."user" restart identity cascade`
+    );
     mockSendPushNotification.mockReset().mockResolvedValue(true);
     mockSendSMS.mockReset().mockResolvedValue(true);
     mockSendEmail.mockReset().mockResolvedValue(true);
     mockIsInQuietHours.mockReset().mockReturnValue(false);
-    mockGetUserById.mockReset().mockResolvedValue({ data: { user: null } });
-    mockServerGetUser.mockReset().mockResolvedValue({ data: { user: null } });
+    mockGetCurrentUser.mockReset().mockResolvedValue(null);
     process.env.CRON_SECRET = "test-cron-secret";
     process.env.ADMIN_EMAILS = "admin@example.com";
-    setup({ queue: [] });
-
-    const mod = await import("../route");
-    POST = mod.POST;
-    GET = mod.GET;
   });
 
   it("returns 401 without a valid CRON_SECRET bearer or admin session", async () => {
@@ -153,7 +151,12 @@ describe("send-batch", () => {
   });
 
   it("accepts an admin session instead of the cron secret", async () => {
-    mockServerGetUser.mockResolvedValue({ data: { user: { email: "admin@example.com" } } });
+    mockGetCurrentUser.mockResolvedValue({
+      id: seedUserId(9),
+      email: "admin@example.com",
+      name: null,
+      image: null,
+    });
     const res = await GET(mockRequest());
     expect(res.status).toBe(200);
   });
@@ -165,15 +168,13 @@ describe("send-batch", () => {
   });
 
   it("sends one consolidated message per user with personalised copy", async () => {
-    setup({
-      queue: [
-        queueItem({ id: "q-1", payload: { picked: "Duke", correct: true, points: 20 } }),
-        queueItem({ id: "q-2", payload: { picked: "Kansas", correct: false, points: 0 } }),
-        queueItem({ id: "q-3", user_id: "user-2" }),
-      ],
-      profiles: { "user-1": profile(), "user-2": profile({ id: "user-2" }) },
-      subs: [sub(), sub({ id: 2, user_id: "user-2", endpoint: "https://push.example.com/b" })],
-    });
+    await seedUser(USER_1);
+    await seedUser(USER_2);
+    const ids = await enqueue([
+      queueItem({ payload: { picked: "Duke", correct: true, points: 20 } }),
+      queueItem({ payload: { picked: "Kansas", correct: false, points: 0 } }),
+      queueItem({ userId: USER_2 }),
+    ]);
 
     const res = await POST(cronRequest());
     const body = await res.json();
@@ -186,16 +187,15 @@ describe("send-batch", () => {
       body: "Duke ✓ +20 · Kansas ✗ · 1 of 2 right today",
       url: "/dashboard",
     });
-    expect(sentIds().sort()).toEqual(["q-1", "q-2", "q-3"]);
+    expect(await sentIds()).toEqual(ids);
   });
 
   it("merges items from older batches into the same notification", async () => {
-    setup({
-      queue: [
-        queueItem({ id: "q-old", batch_key: "20270317-evening", created_at: "2027-03-17T23:00:00Z" }),
-        queueItem({ id: "q-new", payload: { picked: "Houston", correct: true, points: 10 } }),
-      ],
-    });
+    await seedUser(USER_1);
+    const ids = await enqueue([
+      queueItem({ batchKey: "20270317-evening", createdAt: new Date("2027-03-17T23:00:00Z") }),
+      queueItem({ payload: { picked: "Houston", correct: true, points: 10 } }),
+    ]);
 
     await POST(cronRequest());
 
@@ -203,79 +203,82 @@ describe("send-batch", () => {
     expect(mockSendPushNotification.mock.calls[0][1].body).toBe(
       "Houston ✓ +10 · 1 of 1 right today\n1 earlier game: 1 right"
     );
-    expect(sentIds().sort()).toEqual(["q-new", "q-old"]);
+    expect(await sentIds()).toEqual(ids);
   });
 
   it("skips users in quiet hours", async () => {
     mockIsInQuietHours.mockReturnValue(true);
-    setup({ queue: [queueItem(), queueItem({ id: "q-2" })] });
+    await seedUser(USER_1);
+    await enqueue([queueItem(), queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(2);
     expect(body.sent).toBe(0);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
     expect(mockIsInQuietHours).toHaveBeenCalledWith("America/New_York");
+    expect(await sentIds()).toEqual([]);
   });
 
   it("enforces the 3-per-day cap", async () => {
-    setup({ queue: [queueItem()], logCount: { "user-1": 3 } });
+    await seedUser(USER_1, {}, { logCount: 3 });
+    await enqueue([queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(1);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
   });
 
+  it("sends when under the daily cap", async () => {
+    await seedUser(USER_1, {}, { logCount: 2 });
+    await enqueue([queueItem()]);
+
+    const body = await (await POST(cronRequest())).json();
+    expect(body.sent).toBe(1);
+    expect(mockSendPushNotification).toHaveBeenCalledTimes(1);
+  });
+
   it("limits digest_only users to one notification per day", async () => {
-    setup({
-      queue: [queueItem()],
-      profiles: {
-        "user-1": profile({
-          notification_preferences: { push: true, sms: false, email: false, digest_only: true },
-        }),
-      },
-      logCount: { "user-1": 1 },
-    });
+    await seedUser(
+      USER_1,
+      { notificationPreferences: { ...defaultPrefs, digest_only: true } },
+      { logCount: 1 }
+    );
+    await enqueue([queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(1);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
     // The item stays queued (not marked sent) for tomorrow's digest.
-    expect(sentIds()).toEqual([]);
+    expect(await sentIds()).toEqual([]);
   });
 
   it("discards items for users who turned every channel off", async () => {
-    setup({
-      queue: [queueItem()],
-      profiles: {
-        "user-1": profile({
-          notification_preferences: { push: false, sms: false, email: false, digest_only: false },
-        }),
-      },
+    await seedUser(USER_1, {
+      notificationPreferences: { push: false, sms: false, email: false, digest_only: false },
     });
+    const ids = await enqueue([queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.discarded).toBe(1);
     expect(body.sent).toBe(0);
     expect(mockSendPushNotification).not.toHaveBeenCalled();
-    expect(sentIds()).toEqual(["q-1"]);
+    expect(await sentIds()).toEqual(ids);
+    expect(await logRows()).toHaveLength(0);
   });
 
   it("sends via every preferred channel and logs once", async () => {
-    mockGetUserById.mockResolvedValue({ data: { user: { email: "user@example.com" } } });
-    setup({
-      queue: [queueItem()],
-      profiles: {
-        "user-1": profile({
-          notification_preferences: { push: true, sms: true, email: true, digest_only: false },
-        }),
-      },
-    });
+    await seedUser(
+      USER_1,
+      { notificationPreferences: { push: true, sms: true, email: true, digest_only: false } },
+      { email: "user@example.com" }
+    );
+    await enqueue([queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.sent).toBe(1);
 
     expect(mockSendPushNotification).toHaveBeenCalledWith(
-      { endpoint: "https://push.example.com/a", keys: { p256dh: "pk", auth: "ak" } },
+      { endpoint: "https://push.example.com/1", keys: { p256dh: "pk", auth: "ak" } },
       expect.objectContaining({ title: "1 game decided" })
     );
     expect(mockSendSMS).toHaveBeenCalledWith(
@@ -288,62 +291,71 @@ describe("send-batch", () => {
       "Duke ✓ +20 · 1 of 1 right today"
     );
 
-    const logs = client.inserts("notifications_log");
+    const logs = await logRows();
     expect(logs).toHaveLength(1);
-    expect(logs[0].args[0]).toMatchObject({ user_id: "user-1", channel: "push" });
+    expect(logs[0]).toMatchObject({
+      userId: USER_1,
+      channel: "push",
+      message: "1 game decided: Duke ✓ +20 · 1 of 1 right today",
+    });
+  });
+
+  it("skips email when the auth record has no address", async () => {
+    await seedUser(USER_1, {
+      notificationPreferences: { push: false, sms: false, email: true, digest_only: false },
+    });
+    await enqueue([queueItem()]);
+
+    const body = await (await POST(cronRequest())).json();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(body.skipped).toBe(1);
   });
 
   it("pushes to every device and deletes only the stale endpoint", async () => {
     mockSendPushNotification.mockImplementation(async (s: { endpoint: string }) =>
       s.endpoint !== "https://push.example.com/gone"
     );
-    setup({
-      queue: [queueItem()],
-      subs: [sub({ id: 1 }), sub({ id: 2, endpoint: "https://push.example.com/gone" })],
+    await seedUser(USER_1, {}, {
+      subs: [{ endpoint: "https://push.example.com/a" }, { endpoint: "https://push.example.com/gone" }],
     });
+    await enqueue([queueItem()]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.sent).toBe(1);
     expect(mockSendPushNotification).toHaveBeenCalledTimes(2);
-
-    const deletes = client.calls.filter(
-      (c) => c.table === "push_subscriptions" && c.method === "delete"
-    );
-    expect(deletes).toHaveLength(1);
-    const inFilter = client.filtersAfter(deletes[0]).find((f) => f.method === "in");
-    expect(inFilter?.args).toEqual(["id", [2]]);
+    expect(await subEndpoints()).toEqual([{ endpoint: "https://push.example.com/a" }]);
   });
 
   it("bumps attempts and keeps the item when nothing is delivered", async () => {
     mockSendPushNotification.mockResolvedValue(false);
-    setup({ queue: [queueItem({ attempts: 1 })] });
+    await seedUser(USER_1);
+    const [id] = await enqueue([queueItem({ attempts: 1 })]);
 
     const body = await (await POST(cronRequest())).json();
     expect(body.skipped).toBe(1);
-    const updates = client.updates("notification_queue");
-    expect(updates).toHaveLength(1);
-    expect(updates[0].args[0]).toEqual({ attempts: 2, sent: false });
-    expect(client.inserts("notifications_log")).toHaveLength(0);
+    expect(await queueRows()).toEqual([{ id, sent: false, attempts: 2 }]);
+    expect(await logRows()).toHaveLength(0);
+    // The bounced subscription is gone, so the next run won't retry it.
+    expect(await subEndpoints()).toEqual([]);
   });
 
   it("gives up after the fifth failed attempt", async () => {
     mockSendPushNotification.mockResolvedValue(false);
-    setup({ queue: [queueItem({ attempts: 4 })] });
+    await seedUser(USER_1);
+    const [id] = await enqueue([queueItem({ attempts: 4 })]);
 
     await POST(cronRequest());
-    expect(client.updates("notification_queue")[0].args[0]).toEqual({ attempts: 5, sent: true });
+    expect(await queueRows()).toEqual([{ id, sent: true, attempts: 5 }]);
   });
 
   it("deep-links wager notifications to /wagers", async () => {
-    setup({
-      queue: [
-        queueItem({
-          id: "q-w",
-          type: "wager_request",
-          payload: { wager_id: "w1", challenger_name: "Alice", stakes: "Lunch" },
-        }),
-      ],
-    });
+    await seedUser(USER_1);
+    await enqueue([
+      queueItem({
+        type: "wager_request",
+        payload: { wager_id: "w1", challenger_name: "Alice", stakes: "Lunch" },
+      }),
+    ]);
 
     await POST(cronRequest());
     expect(mockSendPushNotification.mock.calls[0][1]).toEqual({

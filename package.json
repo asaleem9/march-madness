@@ -20,8 +20,8 @@
     "db:import-json": "npx tsx scripts/import-bracket-json.ts"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.9.0",
-    "@supabase/supabase-js": "^2.99.2",
+    "@neon/config": "^1.9.2",
+    "@neondatabase/auth": "^0.6.0-beta",
     "@tanstack/react-query": "^5.90.21",
     "drizzle-orm": "^0.45.1",
     "next": "16.1.7",
@@ -34,6 +34,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

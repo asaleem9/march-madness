@@ -1,5 +1,7 @@
 import { ImageResponse } from "next/og";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { brackets } from "@/db/schema";
 import { getTournamentConfig } from "@/lib/tournament";
 
 export const runtime = "nodejs";
@@ -24,21 +26,19 @@ export default async function Image({ params }: { params: Promise<{ id: string }
 
   if (UUID_RE.test(id)) {
     try {
-      const admin = createAdminClient();
-      const [{ data: bracket }, config] = await Promise.all([
-        admin.from("brackets").select("name, score, user_id").eq("id", id).maybeSingle(),
+      const [bracket, config] = await Promise.all([
+        db.query.brackets.findFirst({
+          columns: { name: true, score: true },
+          where: eq(brackets.id, id),
+          with: { user: { columns: { displayName: true } } },
+        }),
         getTournamentConfig(),
       ]);
       year = config?.year ?? null;
       if (bracket) {
         name = bracket.name ?? name;
         score = bracket.score ?? 0;
-        const { data: profile } = await admin
-          .from("profiles")
-          .select("display_name")
-          .eq("id", bracket.user_id)
-          .maybeSingle();
-        owner = profile?.display_name ?? "";
+        owner = bracket.user?.displayName ?? "";
       }
     } catch {
       // Fall through to the generic card — an OG image must never 500.

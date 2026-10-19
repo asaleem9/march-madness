@@ -53,3 +53,5 @@ next-env.d.ts
 
 # keep the example env file
 !.env.example
+.neon
+skills-lock.json

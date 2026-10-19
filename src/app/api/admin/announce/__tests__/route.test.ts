@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { sql } from "drizzle-orm";
+import { emailWaitlist } from "@/db/schema";
 
 vi.hoisted(() => {
   process.env.ADMIN_EMAILS = "admin@test.com";
@@ -8,28 +10,23 @@ vi.hoisted(() => {
   process.env.EMAIL_FROM = "March Madness <brackets@example.com>";
 });
 
-const mockGetUser = vi.fn();
-const mockWaitlistSelect = vi.fn();
+vi.mock("@/db", async () => {
+  const { createTestDb } = await import("@/test/db");
+  return { db: await createTestDb() };
+});
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn(async () => ({ auth: { getUser: mockGetUser } })),
+const { mockGetCurrentUser } = vi.hoisted(() => ({ mockGetCurrentUser: vi.fn() }));
+vi.mock("@/lib/auth/session", () => ({
+  getCurrentUser: (...args: unknown[]) => mockGetCurrentUser(...args),
 }));
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(() => ({
-    from: vi.fn((table: string) => {
-      if (table === "email_waitlist") return { select: mockWaitlistSelect };
-      throw new Error(`unexpected table ${table}`);
-    }),
-  })),
-}));
-
+import { db } from "@/db";
 import { POST } from "../route";
 
 const fetchMock = vi.fn();
 
 function asAdmin() {
-  mockGetUser.mockResolvedValue({ data: { user: { id: "u1", email: "admin@test.com" } } });
+  mockGetCurrentUser.mockResolvedValue({ id: "u1", email: "admin@test.com", name: null, image: null });
 }
 
 function req(body: unknown) {
@@ -40,15 +37,21 @@ function req(body: unknown) {
   });
 }
 
-function waitlist(emails: string[]) {
-  mockWaitlistSelect.mockResolvedValue({ data: emails.map((email) => ({ email })), error: null });
+async function waitlist(emails: string[]) {
+  await db.execute(sql`truncate table email_waitlist restart identity`);
+  // The table has a unique email constraint; the dedupe test relies on
+  // case/whitespace variants that the database treats as distinct.
+  if (emails.length > 0) {
+    await db.insert(emailWaitlist).values(emails.map((email) => ({ email })));
+  }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => "" });
   vi.spyOn(console, "error").mockImplementation(() => {});
+  await waitlist([]);
 });
 
 afterEach(() => {
@@ -58,10 +61,10 @@ afterEach(() => {
 
 describe("POST /api/admin/announce", () => {
   it("returns 403 for non-admins", async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: "u2", email: "normie@test.com" } } });
+    mockGetCurrentUser.mockResolvedValue({ id: "u2", email: "normie@test.com", name: null, image: null });
     const res = await POST(req({ subject: "Hi", text: "Hello", dryRun: true }));
     expect(res.status).toBe(403);
-    expect(mockWaitlistSelect).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 on an invalid body", async () => {
@@ -76,7 +79,7 @@ describe("POST /api/admin/announce", () => {
 
   it("dry run counts deduped recipients and sends nothing", async () => {
     asAdmin();
-    waitlist(["a@x.com", "A@X.com ", "b@x.com", "", "junk"]);
+    await waitlist(["a@x.com", "A@X.com ", "b@x.com", "", "junk"]);
     const res = await POST(req({ subject: "Brackets open", text: "Come play", dryRun: true }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ recipients: 2, dryRun: true });
@@ -85,7 +88,7 @@ describe("POST /api/admin/announce", () => {
 
   it("sends via Resend batch with the opt-out line and reports counts", async () => {
     asAdmin();
-    waitlist(["a@x.com", "b@x.com"]);
+    await waitlist(["a@x.com", "b@x.com"]);
     const res = await POST(req({ subject: "Brackets open", text: "Come play" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ recipients: 2, sent: 2, failed: 0 });
@@ -108,7 +111,7 @@ describe("POST /api/admin/announce", () => {
 
   it("chunks recipients into batches of 100 and counts failed chunks", async () => {
     asAdmin();
-    waitlist(Array.from({ length: 250 }, (_, i) => `user${i}@x.com`));
+    await waitlist(Array.from({ length: 250 }, (_, i) => `user${i}@x.com`));
     fetchMock
       .mockResolvedValueOnce({ ok: true, status: 200, text: async () => "" })
       .mockResolvedValueOnce({ ok: false, status: 422, text: async () => "bad" })
@@ -124,7 +127,6 @@ describe("POST /api/admin/announce", () => {
 
   it("short-circuits with zero recipients without calling Resend", async () => {
     asAdmin();
-    waitlist([]);
     const res = await POST(req({ subject: "S", text: "T" }));
     expect(await res.json()).toEqual({ recipients: 0, sent: 0, failed: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -132,7 +134,7 @@ describe("POST /api/admin/announce", () => {
 
   it("returns 500 when RESEND_API_KEY is missing for a real send", async () => {
     asAdmin();
-    waitlist(["a@x.com"]);
+    await waitlist(["a@x.com"]);
     const saved = process.env.RESEND_API_KEY;
     delete process.env.RESEND_API_KEY;
     try {
@@ -145,10 +147,13 @@ describe("POST /api/admin/announce", () => {
     }
   });
 
+  // Runs last: it removes the table so the read genuinely fails.
   it("returns 500 when the waitlist read fails", async () => {
     asAdmin();
-    mockWaitlistSelect.mockResolvedValue({ data: null, error: { message: "boom" } });
+    await db.execute(sql`drop table email_waitlist`);
     const res = await POST(req({ subject: "S", text: "T", dryRun: true }));
     expect(res.status).toBe(500);
+    expect((await res.json()).error).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

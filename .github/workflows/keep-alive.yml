@@ -1,11 +1,12 @@
-name: Keep Supabase awake
+name: Database keep-alive
 
-# Two jobs keep the free-tier Supabase project from auto-pausing (~7 idle days):
+# Two jobs keep the site healthy between seasons:
 #
-# 1. `ping` hits the app's keep-alive endpoint daily. The route does a tiny
-#    read through the Supabase API, which counts as activity. The job FAILS
-#    when the read doesn't reach the database, so a paused project shows up
-#    as a red run (and a GitHub failure email) instead of going unnoticed.
+# 1. `ping` hits the app's keep-alive endpoint daily. The route runs a tiny
+#    query against the Neon database (whose compute scales to zero when idle
+#    and resumes on the first query). The job FAILS when the query doesn't
+#    reach the database, so an outage shows up as a red run (and a GitHub
+#    failure email) instead of going unnoticed.
 #
 # 2. `heartbeat` pushes an empty commit whenever main has gone 40 days
 #    without one. GitHub silently disables scheduled workflows in a public
@@ -28,7 +29,7 @@ jobs:
             https://bracketmadness.vercel.app/api/keep-alive)
           echo "$body"
           if ! echo "$body" | grep -q '"dbOk":true'; then
-            echo "::error::Keep-alive reached the app but the database read failed. Supabase is probably paused — unpause it in the dashboard."
+            echo "::error::Keep-alive reached the app but the database query failed. Check the Neon project and the DATABASE_URL env var on Vercel."
             exit 1
           fi
 

@@ -1,4 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { and, count, eq, inArray, ne } from "drizzle-orm";
+import type { Db } from "@/db";
+import { bracketPicks, brackets, tournamentConfig } from "@/db/schema";
 import { REQUIRED_PICKS } from "./tournament-structure";
 import { isPastDeadline } from "./tournament-config";
 
@@ -14,46 +16,45 @@ export interface LockResult {
  * "Finalize". Incomplete drafts stay unlocked (and excluded). Idempotent.
  */
 export async function lockBracketsPastDeadline(
-  admin: SupabaseClient,
+  db: Db,
   now: Date = new Date()
 ): Promise<LockResult> {
-  const { data: config } = await admin
-    .from("tournament_config")
-    .select("bracket_lock_deadline")
-    .eq("id", 1)
-    .maybeSingle();
+  const config = await db.query.tournamentConfig.findFirst({
+    where: eq(tournamentConfig.id, 1),
+    columns: { bracketLockDeadline: true },
+  });
 
-  if (!config || !isPastDeadline(config, now)) {
+  if (
+    !config ||
+    !isPastDeadline({ bracket_lock_deadline: config.bracketLockDeadline.toISOString() }, now)
+  ) {
     return { skipped: true, locked: 0, incomplete: 0 };
   }
 
-  const { data: drafts } = await admin
-    .from("brackets")
-    .select("id")
-    .eq("locked", false);
+  const drafts = await db
+    .select({ id: brackets.id })
+    .from(brackets)
+    .where(eq(brackets.locked, false));
 
-  if (!drafts || drafts.length === 0) {
+  if (drafts.length === 0) {
     return { skipped: false, locked: 0, incomplete: 0 };
   }
 
-  const draftIds = drafts.map((d) => d.id as string);
-  const { data: picks } = await admin
-    .from("bracket_picks")
-    .select("bracket_id, round")
-    .in("bracket_id", draftIds);
+  const draftIds = drafts.map((d) => d.id);
+  // Play-ins aren't picked, so they don't count toward a complete bracket.
+  const pickCounts = await db
+    .select({ bracketId: bracketPicks.bracketId, n: count() })
+    .from(bracketPicks)
+    .where(and(inArray(bracketPicks.bracketId, draftIds), ne(bracketPicks.round, "first_four")))
+    .groupBy(bracketPicks.bracketId);
 
-  const counts = new Map<string, number>();
-  for (const p of picks ?? []) {
-    if (p.round === "first_four") continue; // play-ins aren't picked
-    counts.set(p.bracket_id, (counts.get(p.bracket_id) ?? 0) + 1);
-  }
-
+  const counts = new Map(pickCounts.map((p) => [p.bracketId, p.n]));
   const complete = draftIds.filter((id) => (counts.get(id) ?? 0) >= REQUIRED_PICKS);
   if (complete.length > 0) {
-    await admin
-      .from("brackets")
-      .update({ locked: true, updated_at: now.toISOString() })
-      .in("id", complete);
+    await db
+      .update(brackets)
+      .set({ locked: true, updatedAt: now })
+      .where(inArray(brackets.id, complete));
   }
 
   return {

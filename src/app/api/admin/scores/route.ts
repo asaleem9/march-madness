@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { games, tournamentConfig } from "@/db/schema";
 import { isAdminUser } from "@/lib/admin-auth";
 import { sanitizeError } from "@/lib/sanitizeError";
 import { getScoringMultipliers } from "@/lib/tournament-config";
-import { processFinalGame, type FinalGameRow } from "@/lib/process-final-game";
+import { processFinalGame } from "@/lib/process-final-game";
 
 /**
  * Manual score entry (fallback when ESPN is down or wrong). Runs the same
@@ -16,7 +18,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const adminClient = createAdminClient();
   const body = await request.json();
   const { game_id, score_a, score_b, status } = body;
   let { winner_id } = body as { winner_id?: number | null };
@@ -26,11 +27,10 @@ export async function POST(request: NextRequest) {
   }
 
   const finalStatus = status || "final";
-  const { data: existing } = await adminClient
-    .from("games")
-    .select("*, team_a:teams!team_a_id(*), team_b:teams!team_b_id(*)")
-    .eq("id", game_id)
-    .single();
+  const existing = await db.query.games.findFirst({
+    where: eq(games.id, game_id),
+    with: { teamA: true, teamB: true },
+  });
 
   if (!existing) {
     return NextResponse.json({ error: "Game not found" }, { status: 404 });
@@ -38,12 +38,12 @@ export async function POST(request: NextRequest) {
 
   // Derive the winner from the scores when the admin didn't choose one.
   if (finalStatus === "final" && !winner_id && score_a != null && score_b != null) {
-    if (score_a > score_b) winner_id = existing.team_a_id;
-    else if (score_b > score_a) winner_id = existing.team_b_id;
+    if (score_a > score_b) winner_id = existing.teamAId;
+    else if (score_b > score_a) winner_id = existing.teamBId;
   }
   if (finalStatus === "final" && winner_id && score_a != null && score_b != null) {
     const scoreSaysA = score_a > score_b;
-    if ((scoreSaysA && winner_id !== existing.team_a_id) || (!scoreSaysA && score_a !== score_b && winner_id !== existing.team_b_id)) {
+    if ((scoreSaysA && winner_id !== existing.teamAId) || (!scoreSaysA && score_a !== score_b && winner_id !== existing.teamBId)) {
       return NextResponse.json(
         { error: "Winner contradicts the scores" },
         { status: 400 }
@@ -51,36 +51,38 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { error } = await adminClient
-    .from("games")
-    .update({
-      score_a,
-      score_b,
-      winner_id: finalStatus === "final" ? winner_id ?? null : null,
-      status: finalStatus,
-      clock: null,
-      period: null,
-    })
-    .eq("id", game_id);
-
-  if (error) {
-    return NextResponse.json({ error: sanitizeError(error.message) }, { status: 500 });
+  try {
+    await db
+      .update(games)
+      .set({
+        scoreA: score_a ?? null,
+        scoreB: score_b ?? null,
+        winnerId: finalStatus === "final" ? winner_id ?? null : null,
+        status: finalStatus,
+        clock: null,
+        period: null,
+      })
+      .where(eq(games.id, game_id));
+  } catch (err) {
+    return NextResponse.json(
+      { error: sanitizeError(err instanceof Error ? err.message : null) },
+      { status: 500 }
+    );
   }
 
   if (finalStatus === "final" && winner_id) {
-    const { data: config } = await adminClient
-      .from("tournament_config")
-      .select("scoring_multipliers")
-      .eq("id", 1)
-      .maybeSingle();
+    const config = await db.query.tournamentConfig.findFirst({
+      where: eq(tournamentConfig.id, 1),
+      columns: { scoringMultipliers: true },
+    });
 
-    const result = await processFinalGame(adminClient, {
-      game: existing as unknown as FinalGameRow,
+    const result = await processFinalGame(db, {
+      game: existing,
       winnerId: winner_id,
       scoreA: score_a ?? null,
       scoreB: score_b ?? null,
-      multipliers: getScoringMultipliers(config),
-      notify: existing.winner_id !== winner_id,
+      multipliers: getScoringMultipliers({ scoring_multipliers: config?.scoringMultipliers ?? null }),
+      notify: existing.winnerId !== winner_id,
       batchKey: `manual-${new Date().toISOString().slice(0, 10)}`,
     });
     return NextResponse.json({ success: true, ...result });
