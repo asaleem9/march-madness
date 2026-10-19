@@ -78,6 +78,7 @@ describe("LoginForm", () => {
     // Reset search params to default (no redirect / error param)
     mockSearchParams.delete("redirect");
     mockSearchParams.delete("error");
+    mockSearchParams.delete("neon_auth_session_verifier");
   });
 
   it("renders email and password form fields", () => {
@@ -221,6 +222,12 @@ describe("LoginForm", () => {
     render(<LoginForm />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("Google sign-in failed — try again");
+  });
+
+  it("shows the Google failure message when the OAuth return lands here unexchanged", () => {
+    mockSearchParams.set("neon_auth_session_verifier", "abc");
+    render(<LoginForm />);
+    expect(screen.getByText("Google sign-in failed — try again")).toBeInTheDocument();
   });
 
   it("surfaces OAuth errors and re-enables the Google button", async () => {

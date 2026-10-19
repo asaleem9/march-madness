@@ -32,10 +32,19 @@ describe("getSeasonInfo", () => {
     }
   });
 
-  it("falls back to the current year when there is no config row", () => {
-    const now = new Date("2027-03-01T12:00:00Z");
-    expect(getSeasonInfo(null, "pre_tournament", now).displayYear).toBe(2027);
-    expect(getSeasonInfo(undefined, "pre_tournament", now).tournamentYear).toBe(2027);
+  it("treats a missing config row as the off-season after the last tournament", () => {
+    const phase = getEffectivePhase(null, false);
+    expect(phase).toBe("completed");
+
+    const autumn = getSeasonInfo(null, phase, new Date("2026-10-19T12:00:00Z"));
+    expect(autumn).toMatchObject({ tournamentYear: 2026, displayYear: 2027, offSeason: true });
+    expect(autumn.upcoming).toBe(YEAR_DEFAULTS[2027]);
+
+    // Before mid-April the previous year's tournament is still the last one decided.
+    const march = getSeasonInfo(undefined, phase, new Date("2027-03-01T12:00:00Z"));
+    expect(march).toMatchObject({ tournamentYear: 2026, displayYear: 2027 });
+    const lateApril = getSeasonInfo(undefined, phase, new Date("2027-04-20T12:00:00Z"));
+    expect(lateApril).toMatchObject({ tournamentYear: 2027, displayYear: 2028 });
   });
 
   it("has no upcoming dates for a year without defaults", () => {

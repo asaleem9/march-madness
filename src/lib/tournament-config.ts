@@ -53,7 +53,10 @@ export function getEffectivePhase(
   now: Date = new Date()
 ): TournamentPhase {
   if (hasChampion) return "completed";
-  const stored = config?.active_phase ?? "pre_tournament";
+  // No config row at all (fresh database, or between a wipe and the rollover):
+  // there's nothing to pick or follow, so behave as the off-season.
+  if (!config) return "completed";
+  const stored = config.active_phase ?? "pre_tournament";
   if (stored === "pre_tournament" && isPastDeadline(config, now)) return "first_round";
   return stored;
 }
@@ -78,6 +81,17 @@ export interface SeasonInfo {
 }
 
 /**
+ * The most recent tournament when there's no config row to say. The title game
+ * is played in early April, so from mid-April on the current year's tournament
+ * is in the books; before that the last decided one was the previous year's.
+ */
+function lastTournamentYear(now: Date): number {
+  const year = now.getUTCFullYear();
+  const midApril = Date.UTC(year, 3, 15);
+  return now.getTime() >= midApril ? year : year - 1;
+}
+
+/**
  * Which season the site should present. After the title game the config row
  * still says last year (the rollover wipes it in March), so a decided
  * championship means the site is in the off-season and should lead with the
@@ -88,7 +102,7 @@ export function getSeasonInfo(
   phase: TournamentPhase,
   now: Date = new Date()
 ): SeasonInfo {
-  const tournamentYear = config?.year ?? now.getFullYear();
+  const tournamentYear = config?.year ?? lastTournamentYear(now);
   const offSeason = phase === "completed";
   const displayYear = offSeason ? tournamentYear + 1 : tournamentYear;
   return {

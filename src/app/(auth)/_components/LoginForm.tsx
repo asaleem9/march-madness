@@ -17,7 +17,10 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = safeRedirectPath(searchParams.get("redirect"));
-  const oauthError = searchParams.get("error");
+  // When the OAuth return can't be completed (the proxy fails to exchange the
+  // session verifier), the SDK bounces here with the verifier still in the URL.
+  const oauthError =
+    searchParams.get("error") ?? (searchParams.has("neon_auth_session_verifier") ? "auth_failed" : null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
