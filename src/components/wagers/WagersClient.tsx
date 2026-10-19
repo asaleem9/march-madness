@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { WAGER_TABS as TABS, tabFromParam, type WagerTab } from "./tabs";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,26 +38,6 @@ export interface PlayerOption {
   hasBracket: boolean;
 }
 
-export type WagerTab = "pending" | "accepted" | "history";
-const TABS: { key: WagerTab; label: string }[] = [
-  { key: "pending", label: "PENDING" },
-  { key: "accepted", label: "ACTIVE" },
-  { key: "history", label: "HISTORY" },
-];
-
-/** `?tab=pending|active|history` (the dashboard deep-links here); `accepted` is accepted as an alias. */
-export function tabFromParam(value: string | null | undefined): WagerTab {
-  switch (value) {
-    case "pending":
-    case "history":
-      return value;
-    case "active":
-    case "accepted":
-      return "accepted";
-    default:
-      return "pending";
-  }
-}
 
 const STAKES_MAX_LENGTH = 120;
 const selectClass = "w-full border-2 border-navy p-3 font-body text-base bg-cream disabled:opacity-50";

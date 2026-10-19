@@ -6,11 +6,11 @@ import { brackets, profiles, tournamentConfig, wagers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
   WagersClient,
-  tabFromParam,
   type BracketLite,
   type PlayerOption,
   type WagerView,
 } from "@/components/wagers/WagersClient";
+import { tabFromParam } from "@/components/wagers/tabs";
 
 export const metadata: Metadata = { title: "Wagers" };
 export const dynamic = "force-dynamic";
