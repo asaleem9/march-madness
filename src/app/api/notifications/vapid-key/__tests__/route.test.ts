@@ -21,6 +21,17 @@ describe("GET /api/notifications/vapid-key", () => {
     expect(json.publicKey).toBe("BPxM3g9tHkm1dP...");
   });
 
+  it("strips whitespace around the key (an env value saved with a trailing newline)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "BPxM3g9tHkm1dP...\n");
+
+    const { GET } = await import("../route");
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.publicKey).toBe("BPxM3g9tHkm1dP...");
+  });
+
   it("returns empty string when env var is not set", async () => {
     vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "");
 

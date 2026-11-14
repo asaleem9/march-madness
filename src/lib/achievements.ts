@@ -52,6 +52,8 @@ interface GameLite {
   teamBId: number | null;
   teamA: { seed: number } | null;
   teamB: { seed: number } | null;
+  /** The slot this game's winner advances to (used to tell which picks met in a bracket). */
+  nextGameSlot?: number | null;
 }
 
 interface PickLite {
@@ -95,6 +97,18 @@ export function evaluateAchievements(
   const topScore = Math.max(...scores);
   const median = scores[Math.floor(scores.length / 2)];
 
+  // Seed of every team, and for each later-round game the games that feed it.
+  const seedByTeam = new Map<number, number>();
+  const feederSlots = new Map<number, number[]>();
+  for (const g of games) {
+    if (g.teamAId != null && g.teamA) seedByTeam.set(g.teamAId, g.teamA.seed);
+    if (g.teamBId != null && g.teamB) seedByTeam.set(g.teamBId, g.teamB.seed);
+    if (g.nextGameSlot == null || g.round === "first_four") continue;
+    const list = feederSlots.get(g.nextGameSlot) ?? [];
+    list.push(g.gameSlot);
+    feederSlots.set(g.nextGameSlot, list);
+  }
+
   const regionSlots = new Map<string, number[]>();
   for (const g of games) {
     if (!g.region || g.round === "first_four") continue;
@@ -135,15 +149,29 @@ export function evaluateAchievements(
     if (cinderella) earned.push("cinderella");
 
     // Chalk walk: every pick was the better (lower-numbered) seed in its game,
-    // judged against the teams that actually played, and the score is at least
-    // the pool median.
+    // and the score is at least the pool median. From the second round on the
+    // opponent is the team this bracket advanced from the other feeder game —
+    // not whoever actually got there, since the picked team may have lost
+    // earlier and not be in the real game at all. First-round picks (and
+    // brackets with no feeder pick to go on) are judged against the game's
+    // own two teams.
     const allChalk =
       myPicks.length > 0 &&
       myPicks.every((p) => {
-        const g = gameBySlot.get(p.gameSlot);
-        if (!g || !g.teamA || !g.teamB) return true; // undecided matchup: can't judge
-        const pickedSeed = p.pickedTeamId === g.teamAId ? g.teamA.seed : g.teamB.seed;
-        const otherSeed = p.pickedTeamId === g.teamAId ? g.teamB.seed : g.teamA.seed;
+        const pickedSeed = seedByTeam.get(p.pickedTeamId);
+        if (pickedSeed == null) return true; // unknown team: can't judge
+        const bracketOpponent = (feederSlots.get(p.gameSlot) ?? [])
+          .map((slot) => pickBySlot.get(slot)?.pickedTeamId)
+          .find((id) => id != null && id !== p.pickedTeamId);
+        let otherSeed: number | undefined;
+        if (bracketOpponent != null) {
+          otherSeed = seedByTeam.get(bracketOpponent);
+        } else {
+          const g = gameBySlot.get(p.gameSlot);
+          if (g?.teamAId === p.pickedTeamId) otherSeed = g.teamB?.seed;
+          else if (g?.teamBId === p.pickedTeamId) otherSeed = g.teamA?.seed;
+        }
+        if (otherSeed == null) return true; // undecided matchup: can't judge
         return pickedSeed <= otherSeed;
       });
     if (allChalk && (b.score ?? 0) >= median) earned.push("chalk_walk");
@@ -186,6 +214,7 @@ export async function awardAchievements(db: Db): Promise<number> {
         winnerId: true,
         teamAId: true,
         teamBId: true,
+        nextGameSlot: true,
       },
       with: { teamA: { columns: { seed: true } }, teamB: { columns: { seed: true } } },
     }),

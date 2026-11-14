@@ -1,15 +1,18 @@
 import Link from "next/link";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getSeason } from "@/lib/tournament";
 
 const links = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/schedule", label: "Schedule" },
   { href: "/scoring", label: "Scoring" },
-  { href: "/profile", label: "Profile" },
+  { href: "/profile", label: "Profile", membersOnly: true },
 ];
 
 export async function Footer() {
-  const { displayYear } = await getSeason();
+  const [{ displayYear }, user] = await Promise.all([getSeason(), getCurrentUser()]);
+  // Profile needs a session; signed-out visitors would only hit the login page.
+  const visibleLinks = links.filter((l) => !l.membersOnly || !!user);
   return (
     <footer className="bg-navy text-cream-dark border-t-4 border-gold">
       <div className="max-w-7xl mx-auto px-4 py-6">
@@ -18,7 +21,7 @@ export async function Footer() {
             MARCH MADNESS {displayYear}
           </p>
           <nav aria-label="Footer" className="flex flex-wrap justify-center gap-x-5 gap-y-2">
-            {links.map((l) => (
+            {visibleLinks.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}

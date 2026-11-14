@@ -158,6 +158,35 @@ describe("PUT /api/admin/config", () => {
     expect((await config())?.activePhase).toBe("pre_tournament");
   });
 
+  it("returns 404 instead of success when there is no config row, and rewires nothing", async () => {
+    mockAdmin();
+    await seedEliteEight();
+
+    const plain = await PUT(put({ active_phase: "sweet_16" }));
+    expect(plain.status).toBe(404);
+    expect((await plain.json()).error).toMatch(/no tournament config row/i);
+
+    const pairing = await PUT(put({ final_four_pairing: [["east", "south"], ["west", "midwest"]] }));
+    expect(pairing.status).toBe(404);
+    expect(await config()).toBeUndefined();
+    // The Elite Eight rewiring rolled back with the failed save.
+    const west = await db.query.games.findFirst({ where: eq(games.gameSlot, 70) });
+    expect(west).toMatchObject({ nextGameSlot: 73, slotPosition: "bottom" });
+  });
+
+  it("returns 400 for a body that isn't JSON", async () => {
+    mockAdmin();
+    await seedConfig();
+    const response = await PUT(
+      new NextRequest("http://localhost:3000/api/admin/config", {
+        method: "PUT",
+        body: "{not json",
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    expect(response.status).toBe(400);
+  });
+
   it("rewires the Elite Eight slots when the Final Four pairing changes", async () => {
     mockAdmin();
     await seedConfig();

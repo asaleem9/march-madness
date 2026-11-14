@@ -31,6 +31,15 @@ function makeRequest(method: "POST" | "PUT", body: Record<string, unknown>) {
   });
 }
 
+/** A request whose body is sent exactly as given (for malformed JSON). */
+function makeRawRequest(method: "POST" | "PUT", body: string) {
+  return new NextRequest("http://localhost:3000/api/brackets", {
+    method,
+    body,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 const USER = seedUserId(1);
 const OTHER = seedUserId(2);
 
@@ -288,6 +297,50 @@ describe("POST /api/brackets", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("All 63 picks are required to finalize your bracket");
   });
+
+  it("returns 403 when there is no tournament config row (no season to pick for)", async () => {
+    await db.delete(tournamentConfig);
+
+    const res = await POST(makeRequest("POST", { name: "Off-season", picks: [] }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("Brackets aren't open yet.");
+    expect(await db.select().from(brackets)).toHaveLength(0);
+  });
+
+  it.each([
+    ["malformed JSON", "{not json"],
+    ["a null body", "null"],
+    ["an array body", "[]"],
+    ["a null pick", JSON.stringify({ name: "X", picks: [null] })],
+  ])("returns 400 for %s", async (_label, raw) => {
+    const res = await POST(makeRawRequest("POST", raw));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Invalid request body");
+    expect(await db.select().from(brackets)).toHaveLength(0);
+  });
+
+  it("trims the name and caps it at 60 characters", async () => {
+    const res = await POST(makeRequest("POST", { name: `  ${"x".repeat(200)}  `, picks: [] }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect((await bracketById(json.bracketId))?.name).toBe("x".repeat(60));
+  });
+
+  it("answers a second create that raced the first with 409 and the winning bracket id", async () => {
+    const responses = await Promise.all([
+      POST(makeRequest("POST", { name: "First", picks: makePicks(3) })),
+      POST(makeRequest("POST", { name: "Second", picks: makePicks(3) })),
+    ]);
+
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    const created = await responses.find((r) => r.status === 200)!.json();
+    const duplicate = await responses.find((r) => r.status === 409)!.json();
+    expect(duplicate).toEqual({ error: "You already have a bracket", bracketId: created.bracketId });
+    expect(await db.select().from(brackets)).toHaveLength(1);
+  });
 });
 
 // ==========================================================================
@@ -429,5 +482,54 @@ describe("PUT /api/brackets", () => {
     expect((await bracketById(mine.id))?.name).toBe("Renamed Bracket");
     // Picks were NOT touched
     expect(await picksOf(mine.id)).toEqual([{ gameSlot: 13, round: "first_round", pickedTeamId: 150 }]);
+  });
+
+  it("returns 403 when there is no tournament config row", async () => {
+    const mine = await createBracket(USER);
+    await db.delete(tournamentConfig);
+
+    const res = await PUT(makeRequest("PUT", { bracketId: mine.id, picks: makePicks(2) }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("Brackets aren't open yet.");
+    expect(await picksOf(mine.id)).toEqual([]);
+  });
+
+  it.each([
+    ["malformed JSON", "{not json"],
+    ["a null body", "null"],
+  ])("returns 400 for %s", async (_label, raw) => {
+    const res = await PUT(makeRawRequest("PUT", raw));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Invalid request body");
+  });
+
+  it("trims the name, caps it at 60 characters and ignores a blank one", async () => {
+    const mine = await createBracket(USER);
+
+    await PUT(makeRequest("PUT", { bracketId: mine.id, name: `  ${"y".repeat(200)}` }));
+    expect((await bracketById(mine.id))?.name).toBe("y".repeat(60));
+
+    await PUT(makeRequest("PUT", { bracketId: mine.id, name: "   " }));
+    expect((await bracketById(mine.id))?.name).toBe("y".repeat(60));
+  });
+
+  it("a draft save that races a finalize can't change the locked bracket", async () => {
+    const mine = await createBracket(USER);
+
+    const [finalize, draft] = await Promise.all([
+      PUT(makeRequest("PUT", { bracketId: mine.id, picks: makePicks(63), lock: true })),
+      PUT(makeRequest("PUT", { bracketId: mine.id, picks: makePicks(5) })),
+    ]);
+
+    // Both requests read the bracket as unlocked; the lock is re-checked
+    // inside the write, so the draft is refused instead of replacing the
+    // finalized picks.
+    expect(finalize.status).toBe(200);
+    expect(draft.status).toBe(403);
+    expect((await draft.json()).error).toBe("Bracket is locked");
+    expect((await bracketById(mine.id))?.locked).toBe(true);
+    expect(await picksOf(mine.id)).toHaveLength(63);
   });
 });

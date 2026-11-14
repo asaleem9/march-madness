@@ -9,6 +9,7 @@ import { PasswordInput } from "@/components/PasswordInput";
 import type { AchievementType, NotificationPreferences } from "@/types";
 import { Badges } from "./Badges";
 import { PushToggle } from "./PushToggle";
+import { removeDevicePushSubscription } from "@/lib/push-client";
 import { normalizePhoneE164 } from "./phone";
 
 /** The value a profile row gets before the user ever visits this page. */
@@ -194,6 +195,9 @@ export function ProfileClient({
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
+      // While the session is still valid, so the next person on this device
+      // doesn't get this account's notifications.
+      await removeDevicePushSubscription();
       await authClient.signOut();
     } finally {
       setSigningOut(false);

@@ -63,7 +63,27 @@ describe("Header", () => {
     expect(screen.queryByText("Sign Out")).not.toBeInTheDocument();
     expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
     // Public pages stay reachable when logged out.
-    expect(screen.getByText("Leaderboard")).toBeInTheDocument();
+    expect(screen.getAllByText("Leaderboard").length).toBeGreaterThan(0);
+  });
+
+  it("gives signed-out visitors the public links on small screens too", () => {
+    render(<Header />);
+
+    // No drawer when logged out, so the links sit in their own (md:hidden) row.
+    expect(screen.queryByRole("button", { name: "Open menu" })).not.toBeInTheDocument();
+    const nav = document.getElementById("public-nav");
+    expect(nav).not.toBeNull();
+    expect(Array.from(nav!.querySelectorAll("a")).map((a) => a.getAttribute("href"))).toEqual([
+      "/leaderboard",
+      "/schedule",
+      "/scoring",
+    ]);
+  });
+
+  it("has no separate public row once signed in", () => {
+    mockUseSession.mockReturnValue(session(user));
+    render(<Header initialUser={user} />);
+    expect(document.getElementById("public-nav")).toBeNull();
   });
 
   it("shows nav links and Sign Out when authenticated", () => {

@@ -130,6 +130,26 @@ describe("POST /api/wagers", () => {
     expect(await res.json()).toEqual({ error: "Wager creation deadline has passed" });
   });
 
+  it("returns 403 when there is no tournament config row (no season to wager on)", async () => {
+    await db.delete(tournamentConfig);
+
+    const res = await POST(makeRequest(validBody()));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("Wagers aren't open yet");
+    expect(await db.select().from(wagers)).toHaveLength(0);
+  });
+
+  it("returns 400 for a malformed or null body", async () => {
+    const broken = { json: () => Promise.reject(new SyntaxError("Unexpected token")) } as unknown as NextRequest;
+    for (const req of [broken, makeRequest(null as unknown as Record<string, unknown>)]) {
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("Invalid request body");
+    }
+    expect(await db.select().from(wagers)).toHaveLength(0);
+  });
+
   it("returns 400 when the bracket is not owned by the user", async () => {
     const bobsBracket = await createBracket(BOB);
     const res = await POST(makeRequest({ ...validBody(), challenger_bracket_id: bobsBracket.id }));
@@ -275,6 +295,58 @@ describe("PATCH /api/wagers", () => {
     expect(await res.json()).toEqual({ error: "Create a bracket first" });
     expect((await wagerById(wagerId))?.status).toBe("pending");
     expect(await queued()).toHaveLength(0);
+  });
+
+  it("accept: refused once the wager deadline has passed", async () => {
+    await createBracket(BOB);
+    await setWagerDeadline(past);
+    signIn(BOB);
+
+    const res = await PATCH(makeRequest({ wager_id: wagerId, action: "accept" }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe(
+      "The wager deadline has passed, so this wager can no longer be accepted"
+    );
+    expect(await wagerById(wagerId)).toMatchObject({ status: "pending", opponentBracketId: null });
+    expect(await queued()).toEqual([]);
+  });
+
+  it("accept: refused when there is no tournament config row", async () => {
+    await createBracket(BOB);
+    await db.delete(tournamentConfig);
+    signIn(BOB);
+
+    const res = await PATCH(makeRequest({ wager_id: wagerId, action: "accept" }));
+
+    expect(res.status).toBe(403);
+    expect((await wagerById(wagerId))?.status).toBe("pending");
+  });
+
+  it("decline and revoke still work after the wager deadline", async () => {
+    await setWagerDeadline(past);
+
+    signIn(BOB);
+    const declined = await PATCH(makeRequest({ wager_id: wagerId, action: "decline" }));
+    expect(declined.status).toBe(200);
+    expect((await wagerById(wagerId))?.status).toBe("declined");
+
+    const first = await wagerById(wagerId);
+    const other = await createPendingWager(first!.challengerBracketId);
+    signIn(CAROL);
+    const revoked = await PATCH(makeRequest({ wager_id: other.id, action: "revoke" }));
+    expect(revoked.status).toBe(200);
+    expect((await wagerById(other.id))?.status).toBe("declined");
+  });
+
+  it("returns 400 for a malformed or null body", async () => {
+    signIn(BOB);
+    const broken = { json: () => Promise.reject(new SyntaxError("Unexpected token")) } as unknown as NextRequest;
+    for (const req of [broken, makeRequest(null as unknown as Record<string, unknown>)]) {
+      const res = await PATCH(req);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("Invalid request body");
+    }
   });
 
   it("decline: opponent sets declined and the challenger is notified", async () => {

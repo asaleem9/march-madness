@@ -7,6 +7,7 @@ import { useState } from "react";
 import { authClient } from "@/lib/auth/client";
 import type { AppUser } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
+import { removeDevicePushSubscription } from "@/lib/push-client";
 
 const memberLinks = [
   { href: "/dashboard", label: "Dashboard" },
@@ -64,6 +65,9 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
     if (signingOut) return;
     setSigningOut(true);
     try {
+      // While the session is still valid, so the next person on this device
+      // doesn't get this account's notifications.
+      await removeDevicePushSubscription();
       await authClient.signOut();
     } finally {
       setSigningOut(false);
@@ -192,6 +196,23 @@ export function Header({ initialUser = null, isAdmin = false }: HeaderProps) {
             )}
           </div>
         </div>
+
+        {/* Signed-out visitors have no drawer, so on small screens the public
+            pages get a row of their own under the bar. */}
+        {!user && (
+          <nav id="public-nav" className="md:hidden flex justify-center gap-1 pb-3" aria-label="Primary">
+            {publicLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={linkClass(link.href)}
+                aria-current={isActive(link.href) ? "page" : undefined}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+        )}
 
         {/* Mobile Nav */}
         {menuOpen && user && (

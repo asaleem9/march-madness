@@ -136,7 +136,7 @@ describe("send-batch", () => {
     await db.execute(
       sql`truncate table notification_queue, notifications_log, push_subscriptions, profiles, neon_auth."user" restart identity cascade`
     );
-    mockSendPushNotification.mockReset().mockResolvedValue(true);
+    mockSendPushNotification.mockReset().mockResolvedValue("sent");
     mockSendSMS.mockReset().mockResolvedValue(true);
     mockSendEmail.mockReset().mockResolvedValue(true);
     mockIsInQuietHours.mockReset().mockReturnValue(false);
@@ -313,7 +313,7 @@ describe("send-batch", () => {
 
   it("pushes to every device and deletes only the stale endpoint", async () => {
     mockSendPushNotification.mockImplementation(async (s: { endpoint: string }) =>
-      s.endpoint !== "https://push.example.com/gone"
+      s.endpoint === "https://push.example.com/gone" ? "gone" : "sent"
     );
     await seedUser(USER_1, {}, {
       subs: [{ endpoint: "https://push.example.com/a" }, { endpoint: "https://push.example.com/gone" }],
@@ -327,7 +327,7 @@ describe("send-batch", () => {
   });
 
   it("bumps attempts and keeps the item when nothing is delivered", async () => {
-    mockSendPushNotification.mockResolvedValue(false);
+    mockSendPushNotification.mockResolvedValue("gone");
     await seedUser(USER_1);
     const [id] = await enqueue([queueItem({ attempts: 1 })]);
 
@@ -339,8 +339,20 @@ describe("send-batch", () => {
     expect(await subEndpoints()).toEqual([]);
   });
 
+  it("keeps the subscription when a send fails for any reason other than 404/410", async () => {
+    mockSendPushNotification.mockResolvedValue("failed");
+    await seedUser(USER_1);
+    const [id] = await enqueue([queueItem({ attempts: 1 })]);
+
+    const body = await (await POST(cronRequest())).json();
+    expect(body.skipped).toBe(1);
+    expect(await queueRows()).toEqual([{ id, sent: false, attempts: 2 }]);
+    // A push-service outage or bad VAPID config must not wipe the device.
+    expect(await subEndpoints()).toEqual([{ endpoint: "https://push.example.com/1" }]);
+  });
+
   it("gives up after the fifth failed attempt", async () => {
-    mockSendPushNotification.mockResolvedValue(false);
+    mockSendPushNotification.mockResolvedValue("failed");
     await seedUser(USER_1);
     const [id] = await enqueue([queueItem({ attempts: 4 })]);
 

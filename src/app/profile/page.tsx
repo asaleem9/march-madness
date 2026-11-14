@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { profiles, userAchievements } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getVapidPublicKey } from "@/lib/notifications";
 import { ProfileClient } from "@/components/profile/ProfileClient";
 import type { NotificationPreferences } from "@/types";
 
@@ -55,7 +56,7 @@ export default async function ProfilePage() {
         sms: !!process.env.TWILIO_ACCOUNT_SID,
         email: !!process.env.RESEND_API_KEY,
       }}
-      vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""}
+      vapidPublicKey={getVapidPublicKey()}
     />
   );
 }

@@ -1,5 +1,8 @@
 import type { Round, ScoringMultipliers } from "@/types";
 
+/** The public address of the site, used for canonical URLs, the sitemap and social cards. */
+export const SITE_URL = "https://bracketmadness.vercel.app";
+
 export const DEFAULT_SCORING: ScoringMultipliers = {
   first_round: 10,
   second_round: 20,
@@ -71,6 +74,16 @@ export function safeRedirectPath(
   if (redirect.startsWith("//") || redirect.startsWith("/\\")) return fallback;
   // No embedded userinfo/host or scheme.
   if (redirect.includes("@") || redirect.includes("://")) return fallback;
+  // URL parsers drop tabs and newlines, so "/\t/evil.com" would resolve as
+  // "//evil.com". No real path here contains whitespace or control characters.
+  if (/[\u0000-\u0020\u007f]/.test(redirect)) return fallback;
+  // Last word goes to the parser itself: the path must stay on our origin.
+  try {
+    const base = "https://redirect.invalid";
+    if (new URL(redirect, base).origin !== base) return fallback;
+  } catch {
+    return fallback;
+  }
   return redirect;
 }
 

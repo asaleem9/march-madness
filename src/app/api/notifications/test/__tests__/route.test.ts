@@ -43,7 +43,7 @@ beforeEach(async () => {
   await db.execute(sql`truncate table notifications_log, push_subscriptions, profiles restart identity cascade`);
   await seedProfile(db, { id: USER, displayName: "User" });
   await seedProfile(db, { id: OTHER, displayName: "Other" });
-  mockSendPushNotification.mockReset().mockResolvedValue(true);
+  mockSendPushNotification.mockReset().mockResolvedValue("sent");
   mockGetCurrentUser.mockReset().mockResolvedValue({ id: USER, email: "u@example.com", name: null, image: null });
 });
 
@@ -97,8 +97,8 @@ describe("POST /api/notifications/test", () => {
   });
 
   it("removes a bounced subscription but still succeeds when another device got it", async () => {
-    mockSendPushNotification.mockImplementation(
-      async (s: { endpoint: string }) => s.endpoint !== "https://push.example.com/gone"
+    mockSendPushNotification.mockImplementation(async (s: { endpoint: string }) =>
+      s.endpoint === "https://push.example.com/gone" ? "gone" : "sent"
     );
     await seedSubs(["https://push.example.com/a", "https://push.example.com/gone"]);
 
@@ -109,12 +109,22 @@ describe("POST /api/notifications/test", () => {
   });
 
   it("removes a bounced subscription and reports 502 when nothing delivered", async () => {
-    mockSendPushNotification.mockResolvedValue(false);
+    mockSendPushNotification.mockResolvedValue("gone");
     await seedSubs(["https://push.example.com/a"]);
 
     const res = await POST();
     expect(res.status).toBe(502);
     expect(await subEndpoints()).toEqual([]);
+    expect(await logs()).toHaveLength(0);
+  });
+
+  it("keeps the subscription when the send fails for any reason other than 404/410", async () => {
+    mockSendPushNotification.mockResolvedValue("failed");
+    await seedSubs(["https://push.example.com/a"]);
+
+    const res = await POST();
+    expect(res.status).toBe(502);
+    expect(await subEndpoints()).toEqual([{ endpoint: "https://push.example.com/a" }]);
     expect(await logs()).toHaveLength(0);
   });
 });

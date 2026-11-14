@@ -8,6 +8,7 @@ import {
   DEFAULT_SCORING,
   ROUND_DISPLAY_NAMES,
   REGION_DISPLAY_NAMES,
+  safeRedirectPath,
 } from "../utils";
 import type { Round, ScoringMultipliers } from "@/types";
 
@@ -173,5 +174,43 @@ describe("REGION_DISPLAY_NAMES", () => {
     expect(REGION_DISPLAY_NAMES.west).toBe("West");
     expect(REGION_DISPLAY_NAMES.south).toBe("South");
     expect(REGION_DISPLAY_NAMES.midwest).toBe("Midwest");
+  });
+});
+
+describe("safeRedirectPath", () => {
+  it("keeps same-origin relative paths, including query and hash", () => {
+    expect(safeRedirectPath("/dashboard")).toBe("/dashboard");
+    expect(safeRedirectPath("/bracket/new")).toBe("/bracket/new");
+    expect(safeRedirectPath("/wagers?tab=pending#top")).toBe("/wagers?tab=pending#top");
+  });
+
+  it("falls back when there is nothing to redirect to", () => {
+    expect(safeRedirectPath(null)).toBe("/dashboard");
+    expect(safeRedirectPath(undefined)).toBe("/dashboard");
+    expect(safeRedirectPath("")).toBe("/dashboard");
+    expect(safeRedirectPath(null, "/profile")).toBe("/profile");
+  });
+
+  it.each([
+    ["absolute URL", "https://evil.example/phish"],
+    ["protocol-relative //", "//evil.example"],
+    ["backslash /\\", "/\\evil.example"],
+    ["userinfo @", "/@evil.example"],
+    ["embedded scheme", "/x?next=https://evil.example"],
+    ["tab before a second slash", "/\t/evil.example/phish"],
+    ["newline before a second slash", "/\n/evil.example"],
+    ["carriage return before a second slash", "/\r/evil.example"],
+    ["tab before a backslash", "/\t\\evil.example"],
+    ["not rooted at /", "dashboard"],
+    ["javascript: URL", "javascript:alert(1)"],
+  ])("rejects %s", (_label, value) => {
+    expect(safeRedirectPath(value)).toBe("/dashboard");
+  });
+
+  it("never returns a value a browser would resolve off-site", () => {
+    const origin = "https://bracketmadness.vercel.app";
+    for (const value of ["/\t/evil.example", "/\n/evil.example", "//evil.example", "/\\evil.example", "/@evil.example"]) {
+      expect(new URL(safeRedirectPath(value), `${origin}/login`).origin).toBe(origin);
+    }
   });
 });

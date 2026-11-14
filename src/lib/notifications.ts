@@ -2,17 +2,23 @@ import type { NotificationChannel } from "@/types";
 
 let vapidConfigured = false;
 
+/**
+ * The VAPID public key with surrounding whitespace removed. An env value saved
+ * with a trailing newline is otherwise rejected by web-push on every send.
+ */
+export function getVapidPublicKey(): string {
+  return (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "").trim();
+}
+
 async function getWebPush() {
   const webpush = (await import("web-push")).default;
-  if (
-    !vapidConfigured &&
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY &&
-    process.env.VAPID_PRIVATE_KEY
-  ) {
+  const publicKey = getVapidPublicKey();
+  const privateKey = (process.env.VAPID_PRIVATE_KEY ?? "").trim();
+  if (!vapidConfigured && publicKey && privateKey) {
     webpush.setVapidDetails(
-      process.env.VAPID_SUBJECT || "mailto:admin@example.com",
-      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY
+      (process.env.VAPID_SUBJECT ?? "").trim() || "mailto:admin@example.com",
+      publicKey,
+      privateKey
     );
     vapidConfigured = true;
   }
@@ -24,10 +30,18 @@ interface PushSubscriptionData {
   keys: { p256dh: string; auth: string };
 }
 
+/**
+ * Outcome of one push send. Only "gone" (the push service answered 404/410)
+ * means the subscription is dead and its row can be deleted; "failed" covers
+ * everything else (push service errors, network trouble, bad VAPID config) and
+ * the subscription must be kept so the next run can retry it.
+ */
+export type PushResult = "sent" | "gone" | "failed";
+
 export async function sendPushNotification(
   subscription: PushSubscriptionData,
   payload: { title: string; body: string; url?: string }
-): Promise<boolean> {
+): Promise<PushResult> {
   try {
     const webpush = await getWebPush();
     await webpush.sendNotification(
@@ -37,16 +51,16 @@ export async function sendPushNotification(
       },
       JSON.stringify(payload)
     );
-    return true;
+    return "sent";
   } catch (error: unknown) {
     const statusCode = (error as { statusCode?: number }).statusCode;
     if (statusCode === 410 || statusCode === 404) {
       // Subscription expired or invalid — should be cleaned up
       console.log("Push subscription expired:", subscription.endpoint);
-      return false;
+      return "gone";
     }
     console.error("Push notification failed:", error);
-    return false;
+    return "failed";
   }
 }
 

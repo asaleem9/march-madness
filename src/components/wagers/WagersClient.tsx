@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isPastWagerDeadline } from "@/lib/tournament-config";
+import { formatEastern, formatEasternDate } from "@/components/dashboard/helpers";
 import type { WagerStatus } from "@/types";
 
 /** A wager as the page shows it: the row plus both players' display names. */
@@ -125,9 +126,9 @@ export function WagersClient({
     }
   };
 
-  const wagerClosed = isPastWagerDeadline(
-    wagerDeadline ? { wager_creation_deadline: wagerDeadline } : null
-  );
+  // No deadline means no season is configured: the API refuses wagers then too.
+  const wagerClosed =
+    !wagerDeadline || isPastWagerDeadline({ wager_creation_deadline: wagerDeadline });
 
   const handleRespond = async (wagerId: string, action: "accept" | "decline" | "revoke") => {
     setRespondingId(wagerId);
@@ -194,7 +195,13 @@ export function WagersClient({
           onClick={() => setShowCreate(!showCreate)}
           disabled={wagerClosed && !showCreate}
           className="retro-btn retro-btn-primary text-[0.6rem] disabled:opacity-50"
-          title={wagerClosed ? "The wager deadline has passed" : undefined}
+          title={
+            !wagerClosed
+              ? undefined
+              : wagerDeadline
+                ? "The wager deadline has passed"
+                : "Wagers aren't open yet"
+          }
         >
           {showCreate ? "Cancel" : "New Wager"}
         </button>
@@ -206,7 +213,7 @@ export function WagersClient({
 
       {wagerDeadline && (
         <div className="text-[0.6rem] font-display text-navy/50 mb-6">
-          WAGER DEADLINE: {new Date(wagerDeadline).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+          WAGER DEADLINE: {formatEastern(wagerDeadline)}
           {wagerClosed && (
             <span className="text-burnt-orange ml-2">— CLOSED</span>
           )}
@@ -433,15 +440,22 @@ export function WagersClient({
                   — a wager is scored against your bracket.
                 </div>
               )}
+              {awaitingMe && myBrackets.length > 0 && wagerClosed && (
+                <p className="font-body text-xs text-navy/60 mt-3">
+                  The wager deadline has passed, so this challenge can no longer be accepted.
+                </p>
+              )}
               {awaitingMe && myBrackets.length > 0 && (
                 <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => handleRespond(wager.id, "accept")}
-                    disabled={respondingId === wager.id}
-                    className="retro-btn retro-btn-secondary text-[0.6rem] py-2.5 px-4 min-h-11 disabled:opacity-50"
-                  >
-                    {respondingId === wager.id ? "..." : "Accept"}
-                  </button>
+                  {!wagerClosed && (
+                    <button
+                      onClick={() => handleRespond(wager.id, "accept")}
+                      disabled={respondingId === wager.id}
+                      className="retro-btn retro-btn-secondary text-[0.6rem] py-2.5 px-4 min-h-11 disabled:opacity-50"
+                    >
+                      {respondingId === wager.id ? "..." : "Accept"}
+                    </button>
+                  )}
                   <button
                     onClick={() => handleRespond(wager.id, "decline")}
                     disabled={respondingId === wager.id}
@@ -463,7 +477,7 @@ export function WagersClient({
                 </div>
               )}
               <div className="font-body text-xs text-navy/40 mt-2">
-                {new Date(wager.createdAt).toLocaleDateString()}
+                {formatEasternDate(wager.createdAt)}
               </div>
             </div>
           );

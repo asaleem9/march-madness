@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { removeDevicePushSubscription } from "@/lib/push-client";
 
 type Status =
   | "loading"
@@ -51,6 +52,9 @@ export function PushToggle({ enabled, vapidPublicKey, onChange, onError, onInfo 
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
 
+  // The preference as of mount, for the one-time re-sync below.
+  const enabledAtMount = useRef(enabled);
+
   const refresh = useCallback(async () => {
     const s = detectPushStatus();
     setStatus(s);
@@ -58,6 +62,19 @@ export function PushToggle({ enabled, vapidPublicKey, onChange, onError, onInfo 
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub && enabledAtMount.current) {
+        // The browser can hold a subscription the server no longer has (its row
+        // was removed, or it belongs to whoever used this device before).
+        // Register it again so "this device" is true on the server as well;
+        // if that fails, show the device as not subscribed.
+        const res = await fetch("/api/notifications/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub.toJSON()),
+        });
+        setSubscribedHere(res.ok);
+        return;
+      }
       setSubscribedHere(!!sub);
     } catch {
       setSubscribedHere(false);
@@ -91,16 +108,7 @@ export function PushToggle({ enabled, vapidPublicKey, onChange, onError, onInfo 
   };
 
   const unsubscribe = async () => {
-    const reg = await navigator.serviceWorker.getRegistration();
-    const sub = reg ? await reg.pushManager.getSubscription() : null;
-    if (sub) {
-      await fetch("/api/notifications/subscribe", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endpoint: sub.endpoint }),
-      }).catch(() => undefined);
-      await sub.unsubscribe().catch(() => undefined);
-    }
+    await removeDevicePushSubscription();
     setSubscribedHere(false);
   };
 

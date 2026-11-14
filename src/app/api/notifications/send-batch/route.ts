@@ -156,14 +156,15 @@ async function handleSendBatch(request: NextRequest) {
 
         const stale: number[] = [];
         for (const sub of subs) {
-          const ok = await sendPushNotification(
+          const result = await sendPushNotification(
             { endpoint: sub.endpoint, keys: sub.keys },
             { title: message.title, body: message.body, url: message.url }
           );
-          if (ok) success = true;
-          else stale.push(sub.id);
+          if (result === "sent") success = true;
+          else if (result === "gone") stale.push(sub.id);
         }
-        // Only the endpoints that bounced are removed.
+        // Only the endpoints the push service reported gone (404/410) are
+        // removed; any other failure keeps the subscription for the next run.
         if (stale.length > 0) {
           await db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, stale));
         }

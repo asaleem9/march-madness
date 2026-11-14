@@ -24,6 +24,22 @@ async function displayNameOf(userId: string): Promise<string> {
   return row?.displayName || "Someone";
 }
 
+// Wagers can be created and accepted until the wager deadline. With no config
+// row there is no season to wager on, so that is closed too. Returns why
+// wagers are closed, or null while they're open.
+async function wagersClosedReason(): Promise<"not_open" | "past_deadline" | null> {
+  const [config] = await db
+    .select({ deadline: tournamentConfig.wagerCreationDeadline })
+    .from(tournamentConfig)
+    .where(eq(tournamentConfig.id, 1))
+    .limit(1);
+
+  if (!config) return "not_open";
+  return isPastWagerDeadline({ wager_creation_deadline: config.deadline.toISOString() })
+    ? "past_deadline"
+    : null;
+}
+
 /** The user's own bracket by id (or their only bracket when no id is given). */
 async function ownBracketId(userId: string, bracketId?: unknown): Promise<string | null> {
   const where =
@@ -46,7 +62,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
   const { opponent_id, challenger_bracket_id } = body;
   const stakes = typeof body.stakes === "string" ? body.stakes.trim() : "";
 
@@ -72,19 +91,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Check wager deadline
-  const [config] = await db
-    .select({ deadline: tournamentConfig.wagerCreationDeadline })
-    .from(tournamentConfig)
-    .where(eq(tournamentConfig.id, 1))
-    .limit(1);
-
-  if (
-    isPastWagerDeadline(
-      config ? { wager_creation_deadline: config.deadline.toISOString() } : null
-    )
-  ) {
+  const closed = await wagersClosedReason();
+  if (closed) {
     return NextResponse.json(
-      { error: "Wager creation deadline has passed" },
+      { error: closed === "not_open" ? "Wagers aren't open yet" : "Wager creation deadline has passed" },
       { status: 403 }
     );
   }
@@ -131,7 +141,10 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
   const { wager_id, action, bracket_id } = body;
 
   let wager: typeof wagers.$inferSelect | undefined;
@@ -177,6 +190,20 @@ export async function PATCH(request: NextRequest) {
     } else if (action === "accept") {
       if (wager.opponentId !== user.id) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      // Accepting closes with the wager deadline too. Otherwise the opponent
+      // could sit on a challenge and take it only once they're ahead.
+      const closed = await wagersClosedReason();
+      if (closed) {
+        return NextResponse.json(
+          {
+            error:
+              closed === "not_open"
+                ? "Wagers aren't open yet"
+                : "The wager deadline has passed, so this wager can no longer be accepted",
+          },
+          { status: 403 }
+        );
       }
       // The accepting user must have a bracket — it's what the wager is scored
       // against. Use the one they sent (must be theirs) or fall back to their own.

@@ -1,4 +1,4 @@
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, notExists, or, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { bracketPicks, brackets, games, notificationQueue, teams } from "@/db/schema";
 import type { Round, ScoringMultipliers } from "@/types";
@@ -84,7 +84,8 @@ export async function recalculateBracketScores(db: DbLike): Promise<number> {
 
 /**
  * Everything that must happen once a game's winner is known: eliminate the
- * loser, advance the winner into the next slot, resolve play-in picks, score
+ * loser (and un-eliminate a winner that an earlier, corrected result knocked
+ * out), advance the winner into the next slot, resolve play-in picks, score
  * every pick on this game, recalculate bracket totals and (optionally) queue a
  * personalised notification per affected user. Idempotent — safe to re-run.
  *
@@ -110,6 +111,32 @@ export async function processFinalGame(
     if (loserId) {
       await tx.update(teams).set({ eliminated: true }).where(eq(teams.id, loserId));
     }
+    //    When a result is corrected the new winner was eliminated by the first,
+    //    wrong run. Bring them back — unless another final game has them losing,
+    //    so re-running an early game never revives a team that lost later on.
+    await tx
+      .update(teams)
+      .set({ eliminated: false })
+      .where(
+        and(
+          eq(teams.id, winnerId),
+          eq(teams.eliminated, true),
+          notExists(
+            tx
+              .select({ id: games.id })
+              .from(games)
+              .where(
+                and(
+                  ne(games.id, game.id),
+                  eq(games.status, "final"),
+                  isNotNull(games.winnerId),
+                  ne(games.winnerId, winnerId),
+                  or(eq(games.teamAId, winnerId), eq(games.teamBId, winnerId))
+                )
+              )
+          )
+        )
+      );
 
     // 2. Advance the winner.
     if (game.nextGameSlot) {

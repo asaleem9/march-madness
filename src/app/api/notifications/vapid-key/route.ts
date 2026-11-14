@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { getVapidPublicKey } from "@/lib/notifications";
 
 export async function GET() {
   return NextResponse.json({
-    publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
+    publicKey: getVapidPublicKey(),
   });
 }

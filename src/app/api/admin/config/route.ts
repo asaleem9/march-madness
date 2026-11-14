@@ -52,6 +52,9 @@ const updateSchema = z.object({
 
 type ConfigRow = typeof tournamentConfig.$inferSelect;
 
+/** Thrown inside the save transaction when there is no config row to update. */
+class MissingConfigError extends Error {}
+
 /** The admin page reads the config row with its database column names. */
 function serializeConfig(row: ConfigRow) {
   return {
@@ -92,7 +95,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const parsed = updateSchema.safeParse(await request.json());
+  const parsed = updateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues.map((i) => i.message).join("; ") || "Invalid config" },
@@ -148,9 +151,22 @@ export async function PUT(request: NextRequest) {
             .where(and(eq(games.round, "elite_eight"), eq(games.region, region)));
         }
       }
-      await tx.update(tournamentConfig).set(set).where(eq(tournamentConfig.id, 1));
+      const updated = await tx
+        .update(tournamentConfig)
+        .set(set)
+        .where(eq(tournamentConfig.id, 1))
+        .returning({ id: tournamentConfig.id });
+      // Nothing to update (a database that hasn't been rolled over yet): fail
+      // the save, and with it any slot rewiring above, rather than report success.
+      if (updated.length === 0) throw new MissingConfigError();
     });
   } catch (err) {
+    if (err instanceof MissingConfigError) {
+      return NextResponse.json(
+        { error: "There is no tournament config row yet. Run the season rollover first." },
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: sanitizeError(err instanceof Error ? err.message : null) },
       { status: 500 }

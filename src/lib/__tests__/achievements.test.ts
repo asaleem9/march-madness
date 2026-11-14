@@ -52,6 +52,40 @@ describe("evaluateAchievements", () => {
     expect(r2.get("ub")).toContain("chalk_walk");
   });
 
+  describe("chalk walk when a picked favourite was knocked out earlier", () => {
+    // R1: the 9-seed beats the 8-seed and the 16-seed stuns the 1-seed, so the
+    // second-round game is 9 v 16 and neither bracket's second-round pick plays in it.
+    const upsetGames = [
+      { gameSlot: 13, round: "first_round", region: "east", status: "final", winnerId: 4, teamAId: 3, teamBId: 4, teamA: { seed: 8 }, teamB: { seed: 9 }, nextGameSlot: 45 },
+      { gameSlot: 14, round: "first_round", region: "east", status: "final", winnerId: 2, teamAId: 1, teamBId: 2, teamA: { seed: 1 }, teamB: { seed: 16 }, nextGameSlot: 45 },
+      { gameSlot: 45, round: "second_round", region: "east", status: "final", winnerId: 4, teamAId: 4, teamBId: 2, teamA: { seed: 9 }, teamB: { seed: 16 }, nextGameSlot: 61 },
+      { gameSlot: 75, round: "championship", region: null, status: "final", winnerId: 4, teamAId: 4, teamBId: 2, teamA: { seed: 9 }, teamB: { seed: 16 }, nextGameSlot: null },
+    ];
+    const pool = [
+      { id: "chalk", userId: "u-chalk", score: 10, locked: true },
+      { id: "bold", userId: "u-bold", score: 10, locked: true },
+    ];
+    const upsetPicks = [
+      // Favourites all the way: 8 over 9, 1 over 16, then 1 over 8.
+      { bracketId: "chalk", gameSlot: 13, round: "first_round", pickedTeamId: 3, isCorrect: false },
+      { bracketId: "chalk", gameSlot: 14, round: "first_round", pickedTeamId: 1, isCorrect: false },
+      { bracketId: "chalk", gameSlot: 45, round: "second_round", pickedTeamId: 1, isCorrect: false },
+      // Same first round, but the 8-seed over the 1-seed in the second.
+      { bracketId: "bold", gameSlot: 13, round: "first_round", pickedTeamId: 3, isCorrect: false },
+      { bracketId: "bold", gameSlot: 14, round: "first_round", pickedTeamId: 1, isCorrect: false },
+      { bracketId: "bold", gameSlot: 45, round: "second_round", pickedTeamId: 3, isCorrect: false },
+    ];
+    const outcome = evaluateAchievements(pool, upsetPicks, upsetGames);
+
+    it("still awards it to the all-favourites bracket", () => {
+      expect(outcome.get("u-chalk")).toContain("chalk_walk");
+    });
+
+    it("does not award it to a bracket that picked the worse seed of its own matchup", () => {
+      expect(outcome.get("u-bold") ?? []).not.toContain("chalk_walk");
+    });
+  });
+
   it("ignores unlocked drafts and empty pools", () => {
     expect(result.has("uc")).toBe(false);
     expect(evaluateAchievements([], picksLite, gamesLite).size).toBe(0);

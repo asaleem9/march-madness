@@ -9,6 +9,7 @@ import { Toasts } from "@/components/Toasts";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isAdminEmail } from "@/lib/admin-auth";
 import { getSeason } from "@/lib/tournament";
+import { SITE_URL } from "@/lib/utils";
 
 // Reads the session cookie, so it can never be prerendered.
 export const dynamic = "force-dynamic";
@@ -33,6 +34,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const { displayYear, offSeason } = await getSeason();
   const title = `March Madness ${displayYear}`;
   return {
+    // Social-card images and the canonical URL resolve against the public
+    // address, not whichever deployment domain served the request.
+    metadataBase: new URL(SITE_URL),
+    alternates: { canonical: "./" },
     title: { default: `${title} Bracket Challenge`, template: `%s · ${title}` },
     description: offSeason
       ? `Join the waitlist for the ${displayYear} NCAA Tournament bracket challenge. Compete with friends and track every game in retro style.`
@@ -43,6 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: `${title} Bracket Challenge`,
       description: `Pick winners, climb the leaderboard, and wager with friends.`,
       type: "website",
+      url: "./",
     },
   };
 }

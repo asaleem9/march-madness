@@ -164,6 +164,35 @@ describe("processFinalGame", () => {
     expect(next?.teamAId).toBe(2);
   });
 
+  it("a corrected result brings the real winner back and eliminates the real loser", async () => {
+    await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60 });
+    await processFinalGame(db, { game, winnerId: 2, scoreA: 60, scoreB: 80 });
+
+    const rows = await testDb
+      .select({ id: teams.id, eliminated: teams.eliminated })
+      .from(teams)
+      .orderBy(asc(teams.id));
+    expect(rows.slice(0, 2)).toEqual([
+      { id: 1, eliminated: true },
+      { id: 2, eliminated: false },
+    ]);
+  });
+
+  it("re-running an earlier game does not revive a team that lost a later final", async () => {
+    await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60 });
+    // Duke then loses the second-round game.
+    await testDb
+      .update(games)
+      .set({ teamBId: 3, winnerId: 3, status: "final" })
+      .where(eq(games.gameSlot, 45));
+    await testDb.update(teams).set({ eliminated: true }).where(eq(teams.id, 1));
+
+    await processFinalGame(db, { game, winnerId: 1, scoreA: 80, scoreB: 60 });
+
+    const duke = await testDb.query.teams.findFirst({ where: eq(teams.id, 1) });
+    expect(duke?.eliminated).toBe(true);
+  });
+
   it("does not queue notifications when notify is false", async () => {
     const r = await processFinalGame(db, { game, winnerId: 1, scoreA: 1, scoreB: 0, notify: false });
     expect(await testDb.select().from(notificationQueue)).toHaveLength(0);

@@ -55,7 +55,7 @@ export async function POST() {
   let delivered = 0;
   const stale: number[] = [];
   for (const sub of subs) {
-    const ok = await sendPushNotification(
+    const result = await sendPushNotification(
       { endpoint: sub.endpoint, keys: sub.keys },
       {
         title: "Test notification",
@@ -63,8 +63,9 @@ export async function POST() {
         url: "/profile",
       }
     );
-    if (ok) delivered++;
-    else stale.push(sub.id);
+    if (result === "sent") delivered++;
+    // Only a subscription the push service reported gone (404/410) is removed.
+    else if (result === "gone") stale.push(sub.id);
   }
 
   if (stale.length > 0) {

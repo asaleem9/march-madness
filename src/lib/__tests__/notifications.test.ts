@@ -139,3 +139,53 @@ describe("startOfTodayIn", () => {
     expect(startOfTodayIn("Nope/Zone", now).toISOString()).toBe("2026-03-19T00:00:00.000Z");
   });
 });
+
+describe("sendPushNotification", () => {
+  const subscription = { endpoint: "https://push.example.com/a", keys: { p256dh: "pk", auth: "ak" } };
+  const payload = { title: "t", body: "b" };
+  const setVapidDetails = vi.fn();
+  const sendNotification = vi.fn();
+
+  async function load() {
+    vi.resetModules();
+    vi.doMock("web-push", () => ({ default: { setVapidDetails, sendNotification } }));
+    return (await import("../notifications")).sendPushNotification;
+  }
+
+  beforeEach(() => {
+    setVapidDetails.mockReset();
+    sendNotification.mockReset().mockResolvedValue({ statusCode: 201 });
+    vi.unstubAllEnvs();
+    vi.stubEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY", "public-key\n");
+    vi.stubEnv("VAPID_PRIVATE_KEY", " private-key\n");
+    vi.stubEnv("VAPID_SUBJECT", "mailto:owner@example.com\n");
+  });
+
+  it("configures web-push with whitespace-trimmed VAPID values", async () => {
+    const send = await load();
+    expect(await send(subscription, payload)).toBe("sent");
+    expect(setVapidDetails).toHaveBeenCalledWith("mailto:owner@example.com", "public-key", "private-key");
+  });
+
+  it.each([404, 410])("reports 'gone' when the push service answers %i", async (statusCode) => {
+    sendNotification.mockRejectedValue(Object.assign(new Error("gone"), { statusCode }));
+    const send = await load();
+    expect(await send(subscription, payload)).toBe("gone");
+  });
+
+  it.each([400, 403, 429, 500, 503])("reports 'failed' (not 'gone') on a %i", async (statusCode) => {
+    sendNotification.mockRejectedValue(Object.assign(new Error("nope"), { statusCode }));
+    const send = await load();
+    expect(await send(subscription, payload)).toBe("failed");
+  });
+
+  it("reports 'failed' for network errors and VAPID misconfiguration", async () => {
+    sendNotification.mockRejectedValue(new Error("ECONNRESET"));
+    expect(await (await load())(subscription, payload)).toBe("failed");
+
+    setVapidDetails.mockImplementation(() => {
+      throw new Error("Vapid public key must be a URL safe Base 64");
+    });
+    expect(await (await load())(subscription, payload)).toBe("failed");
+  });
+});

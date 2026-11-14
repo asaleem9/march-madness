@@ -248,6 +248,26 @@ describe("WagersClient", () => {
     expect(screen.getByText("— CLOSED")).toBeInTheDocument();
   });
 
+  it("offers only Decline on an incoming challenge once the deadline has passed", () => {
+    render(<WagersClient {...baseProps} wagerDeadline={past} />);
+    const card = screen.getByText("Loser buys lunch").closest(".retro-card")!;
+    expect(within(card as HTMLElement).queryByRole("button", { name: /accept/i })).not.toBeInTheDocument();
+    expect(within(card as HTMLElement).getByRole("button", { name: /decline/i })).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText(/can no longer be accepted/i)).toBeInTheDocument();
+  });
+
+  it("treats a missing deadline (no season configured) as closed", () => {
+    render(<WagersClient {...baseProps} wagerDeadline={null} />);
+    expect(screen.getByRole("button", { name: /new wager/i })).toBeDisabled();
+    const card = screen.getByText("Loser buys lunch").closest(".retro-card")!;
+    expect(within(card as HTMLElement).queryByRole("button", { name: /accept/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the deadline in Eastern time with the zone spelled out", () => {
+    render(<WagersClient {...baseProps} wagerDeadline="2027-03-18T16:00:00Z" />);
+    expect(screen.getByText(/WAGER DEADLINE: Thu, Mar 18, 12:00 PM EDT/)).toBeInTheDocument();
+  });
+
   it("asks the user to make a bracket before accepting", () => {
     render(<WagersClient {...baseProps} brackets={brackets.filter((b) => b.userId !== me)} />);
     const card = screen.getByText("Loser buys lunch").closest(".retro-card")!;

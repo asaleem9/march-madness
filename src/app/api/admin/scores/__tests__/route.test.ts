@@ -104,6 +104,20 @@ describe("POST /api/admin/scores", () => {
     expect((await POST(req({ game_id: 99, score_a: 1, score_b: 0 }))).status).toBe(404);
   });
 
+  it("returns 400 for a malformed or null body", async () => {
+    mockAdmin();
+    for (const body of ["{not json", "null"]) {
+      const res = await POST(
+        new NextRequest("http://localhost:3000/api/admin/scores", {
+          method: "POST", body, headers: { "Content-Type": "application/json" },
+        })
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("Invalid request body");
+    }
+    expect((await gameRow())?.status).toBe("scheduled");
+  });
+
   it("saves an in-progress score without running the final pipeline", async () => {
     mockAdmin();
     const res = await POST(req({ game_id: gameId, score_a: 40, score_b: 38, status: "in_progress" }));
